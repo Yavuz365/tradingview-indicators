@@ -1,0 +1,284 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+indicator("Master Dashboard", shorttitle="Dashboard", overlay=false, max_bars_back=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DESCRIPTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Multi-symbol screener combining signals from all indicators:
+// - Real-time monitoring of multiple symbols
+// - Confluence scoring across indicators
+// - Signal aggregation (MTF, SMC, Volume Profile, Market Structure)
+// - Dashboard table with color-coded alerts
+// - Customizable watchlist
+// - One-glance market overview for trading decisions
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS - SYMBOL WATCHLIST
+// ═══════════════════════════════════════════════════════════════════════════════
+
+string symbol1 = input.symbol("BINANCE:BTCUSDT", "Symbol 1", group="Watchlist")
+string symbol2 = input.symbol("BINANCE:ETHUSDT", "Symbol 2", group="Watchlist")
+string symbol3 = input.symbol("BINANCE:BNBUSDT", "Symbol 3", group="Watchlist")
+string symbol4 = input.symbol("BINANCE:SOLUSDT", "Symbol 4", group="Watchlist")
+string symbol5 = input.symbol("BINANCE:ADAUSDT", "Symbol 5", group="Watchlist")
+string symbol6 = input.symbol("BINANCE:XRPUSDT", "Symbol 6", group="Watchlist")
+string symbol7 = input.symbol("BINANCE:DOGEUSDT", "Symbol 7", group="Watchlist")
+string symbol8 = input.symbol("BINANCE:DOTUSDT", "Symbol 8", group="Watchlist")
+
+bool useSymbol1 = input.bool(true, "Enable Symbol 1", group="Watchlist", inline="1")
+bool useSymbol2 = input.bool(true, "Enable Symbol 2", group="Watchlist", inline="2")
+bool useSymbol3 = input.bool(true, "Enable Symbol 3", group="Watchlist", inline="3")
+bool useSymbol4 = input.bool(true, "Enable Symbol 4", group="Watchlist", inline="4")
+bool useSymbol5 = input.bool(false, "Enable Symbol 5", group="Watchlist", inline="5")
+bool useSymbol6 = input.bool(false, "Enable Symbol 6", group="Watchlist", inline="6")
+bool useSymbol7 = input.bool(false, "Enable Symbol 7", group="Watchlist", inline="7")
+bool useSymbol8 = input.bool(false, "Enable Symbol 8", group="Watchlist", inline="8")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS - INDICATOR SETTINGS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// MTF Confluence Settings
+string mtfTimeframe = input.timeframe("60", "MTF Timeframe", group="MTF Confluence")
+int rsiLength = input.int(14, "RSI Length", group="MTF Confluence")
+float rsiOversold = input.float(30, "RSI Oversold", group="MTF Confluence")
+float rsiOverbought = input.float(70, "RSI Overbought", group="MTF Confluence")
+
+// Market Structure Settings
+int swingLength = input.int(10, "Swing Detection Length", group="Market Structure")
+
+// Trend Filter
+bool useTrendFilter = input.bool(true, "Apply Trend Filter", group="Filters",
+     tooltip="Only show signals aligned with higher timeframe trend")
+string trendTimeframe = input.timeframe("240", "Trend Timeframe", group="Filters")
+
+// Signal Threshold
+int minConfluence = input.int(2, "Minimum Confluence Score", minval=1, maxval=5, group="Filters",
+     tooltip="Minimum number of aligned signals to display")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS - DISPLAY SETTINGS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+string tableSize = input.string("Normal", "Table Size", options=["Small", "Normal", "Large"], group="Display")
+bool showPrice = input.bool(true, "Show Current Price", group="Display")
+bool showChange = input.bool(true, "Show Price Change %", group="Display")
+bool showVolume = input.bool(true, "Show Volume Status", group="Display")
+bool sortByConfluence = input.bool(true, "Sort by Confluence Score", group="Display")
+bool highlightStrongSignals = input.bool(true, "Highlight Strong Signals", group="Display")
+
+// Color Settings
+color bullishColor = input.color(color.new(color.green, 0), "Bullish Signal", group="Colors")
+color bearishColor = input.color(color.new(color.red, 0), "Bearish Signal", group="Colors")
+color neutralColor = input.color(color.new(color.gray, 50), "Neutral", group="Colors")
+color strongBullColor = input.color(color.new(color.lime, 0), "Strong Bullish", group="Colors")
+color strongBearColor = input.color(color.new(color.maroon, 0), "Strong Bearish", group="Colors")
+
+// Alert Settings
+bool alertOnStrongSignal = input.bool(true, "Alert on Strong Signal", group="Alerts")
+int strongSignalThreshold = input.int(4, "Strong Signal Threshold", minval=3, maxval=5, group="Alerts")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: INDICATOR CALCULATIONS FOR EACH SYMBOL
+// ═══════════════════════════════════════════════════════════════════════════════
+// For each enabled symbol, calculate:
+// 1. RSI signal (BUY/SELL/NEUTRAL)
+// 2. MACD signal
+// 3. Stochastic signal
+// 4. Trend direction (HTF)
+// 5. Market structure (HH/HL vs LH/LL)
+// 6. Volume analysis
+// 7. Confluence score (sum of aligned signals)
+
+// TODO: Implement multi-symbol calculations
+// - Use request.security() to fetch data from each symbol
+// - Calculate indicators (RSI, MACD, Stoch, MA) for each
+// - Generate standardized signals (1, 0, -1)
+// - Calculate confluence score per symbol
+// - Store results in arrays for dashboard display
+// - Handle symbol availability errors
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: SIGNAL AGGREGATION & SCORING
+// ═══════════════════════════════════════════════════════════════════════════════
+// Combine signals from multiple indicators into unified score:
+// - Each indicator contributes -1, 0, or +1
+// - Total score = sum of all signals
+// - Score >= 3: Strong Bullish
+// - Score >= 2: Moderate Bullish
+// - Score <= -3: Strong Bearish
+// - Score <= -2: Moderate Bearish
+// - Score between -1 and 1: Neutral
+
+// TODO: Implement scoring algorithm
+// - Function to calculate score per symbol
+// - Weighting system (optional: weight certain indicators more)
+// - Trend filter: invalidate counter-trend signals
+// - Volume confirmation: boost score if volume high
+// - Return: [symbol, score, individual_signals]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: DASHBOARD TABLE CONSTRUCTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Create table showing all symbols with signals:
+// Columns: Symbol | Price | Change% | RSI | MACD | Stoch | Trend | Structure | Volume | Score
+// Rows: One per enabled symbol
+// Colors: Green for bullish, Red for bearish, Gray for neutral
+// Sorting: By confluence score (descending abs value)
+
+// TODO: Implement table rendering
+// - Calculate number of enabled symbols (rows)
+// - Create table with appropriate columns
+// - Populate header row
+// - For each symbol:
+//   - Fetch current price and change%
+//   - Get signal values
+//   - Calculate confluence score
+//   - Add row with color-coded cells
+// - Optionally sort rows by score
+// - Highlight strong signals with bold/background
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: SORTING & FILTERING
+// ═══════════════════════════════════════════════════════════════════════════════
+// Allow user to filter and sort results:
+// - Sort by: Confluence score, Price change%, Volume
+// - Filter: Minimum confluence threshold
+// - Hide neutral signals if desired
+// - Trend filter: Only show HTF trend-aligned signals
+
+// TODO: Implement sorting logic
+// - Create array of [symbol, score] pairs
+// - Sort array by score (descending)
+// - Rebuild table in sorted order
+// - Apply minConfluence filter
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: REAL-TIME UPDATES
+// ═══════════════════════════════════════════════════════════════════════════════
+// Update dashboard on every new bar:
+// - Recalculate all indicators
+// - Update table cells
+// - Trigger alerts if conditions met
+// - Refresh price/change data
+
+// TODO: Implement update mechanism
+// - Use barstate.islast for current values
+// - Recalculate on each bar close
+// - Update table cells (table.cell_set_text/color)
+// - Check alert conditions
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER CALCULATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Simple RSI calculation for current symbol (placeholder)
+float currentRSI = ta.rsi(close, rsiLength)
+int rsiSignal = currentRSI <= rsiOversold ? 1 : (currentRSI >= rsiOverbought ? -1 : 0)
+
+// MACD placeholder
+[macdLine, signalLine, histogram] = ta.macd(close, 12, 26, 9)
+int macdSignal = histogram > 0 ? 1 : -1
+
+// Simple trend (MA crossover placeholder)
+float fastMA = ta.sma(close, 20)
+float slowMA = ta.sma(close, 50)
+int trendSignal = fastMA > slowMA ? 1 : -1
+
+// Confluence score placeholder
+int confluenceScore = rsiSignal + macdSignal + trendSignal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER TABLE (Simple 2x2 example)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+if barstate.islast
+    var table dashboardTable = table.new(position.middle_center, columns=3, rows=2,
+         bgcolor=color.new(color.black, 90),
+         border_width=1)
+
+    // Header
+    table.cell(dashboardTable, 0, 0, "Symbol", bgcolor=color.new(color.blue, 70), text_color=color.white)
+    table.cell(dashboardTable, 1, 0, "Signal", bgcolor=color.new(color.blue, 70), text_color=color.white)
+    table.cell(dashboardTable, 2, 0, "Score", bgcolor=color.new(color.blue, 70), text_color=color.white)
+
+    // Current symbol row
+    table.cell(dashboardTable, 0, 1, syminfo.ticker, text_color=color.white)
+    string signalText = confluenceScore > 0 ? "BULLISH" : (confluenceScore < 0 ? "BEARISH" : "NEUTRAL")
+    color signalColor = confluenceScore > 0 ? bullishColor : (confluenceScore < 0 ? bearishColor : neutralColor)
+    table.cell(dashboardTable, 1, 1, signalText, text_color=signalColor)
+    table.cell(dashboardTable, 2, 1, str.tostring(confluenceScore), text_color=signalColor)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER PLOTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+plot(confluenceScore, "Confluence Score", color=color.blue, linewidth=2)
+hline(minConfluence, "Bullish Threshold", color=color.green, linestyle=hline.style_dashed)
+hline(-minConfluence, "Bearish Threshold", color=color.red, linestyle=hline.style_dashed)
+hline(0, "Neutral", color=color.gray, linestyle=hline.style_solid)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER ALERTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(
+     alertOnStrongSignal and confluenceScore >= strongSignalThreshold,
+     title="Strong Bullish Signal",
+     message="{{ticker}}: Strong bullish confluence detected! Score: " + str.tostring(confluenceScore)
+ )
+
+alertcondition(
+     alertOnStrongSignal and confluenceScore <= -strongSignalThreshold,
+     title="Strong Bearish Signal",
+     message="{{ticker}}: Strong bearish confluence detected! Score: " + str.tostring(confluenceScore)
+ )
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPLEMENTATION NOTES
+// ═══════════════════════════════════════════════════════════════════════════════
+// This is a skeleton template. Complete implementation requires:
+// 1. Multi-symbol data fetching using request.security() in loops
+// 2. Indicator calculations for each symbol (RSI, MACD, Stoch, MA, etc.)
+// 3. Signal generation and standardization (BUY=1, NEUTRAL=0, SELL=-1)
+// 4. Confluence scoring algorithm
+// 5. Dynamic table construction based on enabled symbols
+// 6. Sorting/filtering logic
+// 7. Color-coding based on signal strength
+// 8. Real-time updates on each bar
+// 9. Comprehensive alert system
+// 10. Performance optimization (limit request.security calls)
+
+// Dashboard features to implement:
+// - Symbol price and % change display
+// - Volume analysis (relative to average)
+// - Trend alignment indicator (HTF vs LTF)
+// - Market structure status (HH/HL or LH/LL)
+// - Time since last signal
+// - Signal strength visualization (color intensity)
+
+// Performance considerations:
+// - TradingView limits: ~40 security() calls per script
+// - For 8 symbols × 5 indicators = 40 calls (at limit!)
+// - Solution: Use tuple returns to minimize calls
+// - Example: [rsi, macd, stoch] = request.security(symbol, tf, [rsi, macd, stoch])
+// - Cache results per bar to avoid recalculation
+
+// Usage workflow:
+// 1. Configure watchlist (8 symbols max for performance)
+// 2. Set indicator parameters (RSI, MACD, etc.)
+// 3. Enable trend filter if desired
+// 4. Set minimum confluence threshold
+// 5. Monitor dashboard for strong signals
+// 6. Click symbol in watchlist to open chart
+// 7. Verify setup on individual chart before entry
+
+// Trading applications:
+// - Quick market scan at session open
+// - Identify strongest setups across watchlist
+// - Monitor multiple timeframes simultaneously
+// - Confluence-based trade prioritization
+// - Alert-driven execution (wait for dashboard signal)

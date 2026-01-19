@@ -1,0 +1,210 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+indicator("Volume Profile", shorttitle="Vol Profile", overlay=true, max_bars_back=5000)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DESCRIPTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Session-based Volume Profile indicator showing volume distribution by price level:
+// - Point of Control (POC): Price level with highest volume
+// - Value Area High (VAH): Upper boundary of 70% volume distribution
+// - Value Area Low (VAL): Lower boundary of 70% volume distribution
+// - Visual histogram showing volume concentration at each price level
+// - Session segmentation (daily, weekly, monthly, custom)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Session Settings
+string sessionType = input.string("Daily", "Session Type", options=["Daily", "Weekly", "Monthly", "Custom"], group="Session Settings")
+string customSession = input.session("0930-1600", "Custom Session Time", group="Session Settings", tooltip="Format: HHMM-HHMM")
+int lookbackSessions = input.int(10, "Lookback Sessions", minval=1, maxval=100, group="Session Settings",
+     tooltip="Number of past sessions to display")
+
+// Profile Settings
+int numRows = input.int(24, "Number of Price Rows", minval=10, maxval=100, group="Profile Settings",
+     tooltip="Higher = more granular but slower calculation")
+float valueAreaPercent = input.float(70, "Value Area %", minval=50, maxval=95, step=5, group="Profile Settings",
+     tooltip="Percentage of volume to include in Value Area")
+bool showHistogram = input.bool(true, "Show Volume Histogram", group="Profile Settings")
+float histogramWidth = input.float(50, "Histogram Width (bars)", minval=10, maxval=200, group="Profile Settings")
+
+// Display Settings
+bool showPOC = input.bool(true, "Show Point of Control (POC)", group="Display")
+bool showVAH = input.bool(true, "Show Value Area High (VAH)", group="Display")
+bool showVAL = input.bool(true, "Show Value Area Low (VAL)", group="Display")
+bool showValueArea = input.bool(true, "Show Value Area Zone", group="Display")
+bool showOpeningRange = input.bool(false, "Show Opening Range", group="Display")
+
+// Color Settings
+color pocColor = input.color(color.new(color.yellow, 0), "POC Color", group="Colors")
+color vahColor = input.color(color.new(color.green, 50), "VAH Color", group="Colors")
+color valColor = input.color(color.new(color.red, 50), "VAL Color", group="Colors")
+color vaZoneColor = input.color(color.new(color.blue, 90), "Value Area Zone Color", group="Colors")
+color histogramColor = input.color(color.new(color.gray, 70), "Histogram Color", group="Colors")
+
+// Alert Settings
+bool alertOnPOCTouch = input.bool(false, "Alert on POC Touch", group="Alerts")
+bool alertOnVABreak = input.bool(false, "Alert on Value Area Break", group="Alerts")
+bool alertOnVARetest = input.bool(true, "Alert on VA Boundary Retest", group="Alerts")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: SESSION DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Determine session boundaries based on user selection:
+// - Daily: Reset at midnight or custom time
+// - Weekly: Reset on Monday
+// - Monthly: Reset on first day of month
+// - Custom: User-defined session times
+
+// TODO: Implement session detection
+// - Use timeframe.change() to detect session boundaries
+// - Track session start/end bar indices
+// - Create array to store session data
+// - Handle timezone conversions if needed
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: PRICE LEVEL BINNING
+// ═══════════════════════════════════════════════════════════════════════════════
+// Divide price range into discrete levels (rows) and accumulate volume:
+// - Calculate session high/low
+// - Create array of price levels (bins)
+// - Iterate through bars in session
+// - Accumulate volume to appropriate price bin
+
+// TODO: Implement volume accumulation
+// - Array to store volume at each price level
+// - Bin size = (session_high - session_low) / numRows
+// - For each bar: add volume to bins touched by high-low range
+// - Use VWAP-style calculation for accurate distribution
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: POC CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Find price level with maximum volume in session:
+// - Iterate through volume bins
+// - Identify bin with highest volume
+// - Return corresponding price level
+// - Draw horizontal line at POC
+
+// TODO: Implement POC calculation
+// - Find index of maximum value in volume array
+// - Convert index back to price level
+// - Draw line using line.new()
+// - Update dynamically as session progresses
+// - Extend line to right edge of session
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: VALUE AREA CALCULATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Calculate VAH and VAL using developing value area algorithm:
+// 1. Start at POC
+// 2. Expand up/down to adjacent bins with most volume
+// 3. Continue until X% of total volume is captured
+// 4. VAH = upper boundary, VAL = lower boundary
+
+// TODO: Implement Value Area calculation
+// - Calculate total volume for session
+// - Target volume = total * (valueAreaPercent / 100)
+// - Start from POC bin, accumulate volume
+// - Expand to highest adjacent bin iteratively
+// - Stop when target volume reached
+// - Record VAH and VAL price levels
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: HISTOGRAM VISUALIZATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Draw horizontal bars showing volume at each price level:
+// - Use line objects or boxes
+// - Bar length proportional to volume
+// - Position bars to right of session
+// - Color-code based on relation to VA
+
+// TODO: Implement histogram drawing
+// - For each price level with volume > 0:
+//   - Calculate bar length (volume / max_volume * histogramWidth)
+//   - Draw line from session_end_bar to session_end_bar + bar_length
+//   - Color: POC = yellow, VA = blue, Outside VA = gray
+// - Manage line/box arrays to delete old sessions
+// - Performance: limit concurrent drawn objects
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: ZONE VISUALIZATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Draw shaded box for Value Area zone (VAH to VAL):
+// - Use box.new() to create zone
+// - Extend to right edge or next session
+// - Semi-transparent fill
+// - Update as session develops
+
+// TODO: Implement zone drawing
+// - box.new(x1=session_start, y1=VAL, x2=session_end, y2=VAH)
+// - Update box coordinates as VA changes
+// - Manage box array for multiple sessions
+// - Delete old boxes when exceeding lookback limit
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER CALCULATIONS (Example)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Simple placeholder: VWAP as POC proxy
+float vwapValue = ta.vwap(close)
+
+// Placeholder: Standard deviation bands as VA proxy
+float vwapStdev = ta.stdev(close, 20)
+float placeholder_VAH = vwapValue + vwapStdev
+float placeholder_VAL = vwapValue - vwapStdev
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER VISUALIZATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+plot(showPOC ? vwapValue : na, "POC (Placeholder)", color=pocColor, linewidth=2, style=plot.style_line)
+plot(showVAH ? placeholder_VAH : na, "VAH (Placeholder)", color=vahColor, linewidth=1, style=plot.style_line)
+plot(showVAL ? placeholder_VAL : na, "VAL (Placeholder)", color=valColor, linewidth=1, style=plot.style_line)
+
+// Value Area fill (placeholder)
+fill_color = showValueArea ? vaZoneColor : na
+vahPlot = plot(showValueArea ? placeholder_VAH : na, color=color.new(color.white, 100))
+valPlot = plot(showValueArea ? placeholder_VAL : na, color=color.new(color.white, 100))
+fill(vahPlot, valPlot, color=fill_color)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS (PLACEHOLDERS)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+pocTouch = ta.cross(close, vwapValue)
+vahBreak = ta.crossover(close, placeholder_VAH)
+valBreak = ta.crossunder(close, placeholder_VAL)
+
+alertcondition(alertOnPOCTouch and pocTouch, title="POC Touch", message="{{ticker}}: Price touched POC at {{close}}")
+alertcondition(alertOnVABreak and vahBreak, title="VAH Break", message="{{ticker}}: Price broke above VAH")
+alertcondition(alertOnVABreak and valBreak, title="VAL Break", message="{{ticker}}: Price broke below VAL")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPLEMENTATION NOTES
+// ═══════════════════════════════════════════════════════════════════════════════
+// This is a skeleton template. Complete implementation requires:
+// 1. Session boundary detection (timeframe.change, custom logic)
+// 2. Price-level binning algorithm (arrays for volume distribution)
+// 3. POC identification (max volume bin)
+// 4. Value Area calculation (developing VA algorithm)
+// 5. Histogram drawing (lines/boxes for each price level)
+// 6. Zone visualization (box objects for VA)
+// 7. Performance optimization (limit objects, efficient loops)
+// 8. Historical session storage (arrays for multiple sessions)
+
+// Volume Profile concepts:
+// - POC acts as magnet (high probability reversion level)
+// - VA represents fair value (70% of volume = accepted prices)
+// - Price outside VA = seeking new value (trending behavior)
+// - POC migration = value area shift (trend confirmation)
+// - High/low volume nodes = support/resistance
+
+// Algorithm reference:
+// - TPO/Market Profile methodology
+// - Developing Value Area calculation
+// - Session-based vs Fixed Range profiling

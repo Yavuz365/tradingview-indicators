@@ -1,0 +1,350 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+indicator("MTF Confluence Scanner", shorttitle="MTF Confluence", overlay=true, max_bars_back=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// LIBRARY IMPORTS
+// ═══════════════════════════════════════════════════════════════════════════════
+// NOTE: Before using this indicator, you must:
+// 1. Publish TimeFrameUtils.pine and CommonSignals.pine as libraries
+// 2. Replace "YourUsername" below with your TradingView username
+// 3. Update version numbers if needed (check your library versions)
+
+// import YourUsername/TimeFrameUtils/1 as TF
+// import YourUsername/CommonSignals/1 as Sig
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Timeframe Selection
+string tf1 = input.timeframe("15", "Timeframe 1", group="Multi-Timeframe Settings")
+string tf2 = input.timeframe("60", "Timeframe 2", group="Multi-Timeframe Settings")
+string tf3 = input.timeframe("240", "Timeframe 3", group="Multi-Timeframe Settings")
+string tf4 = input.timeframe("D", "Timeframe 4", group="Multi-Timeframe Settings")
+
+// Indicator Parameters
+int rsiLength = input.int(14, "RSI Length", minval=1, group="Indicator Settings")
+float rsiOversold = input.float(30, "RSI Oversold", minval=0, maxval=50, group="Indicator Settings")
+float rsiOverbought = input.float(70, "RSI Overbought", minval=50, maxval=100, group="Indicator Settings")
+
+int macdFast = input.int(12, "MACD Fast Length", minval=1, group="Indicator Settings")
+int macdSlow = input.int(26, "MACD Slow Length", minval=1, group="Indicator Settings")
+int macdSignal = input.int(9, "MACD Signal Length", minval=1, group="Indicator Settings")
+
+int stochK = input.int(14, "Stochastic %K", minval=1, group="Indicator Settings")
+int stochD = input.int(3, "Stochastic %D", minval=1, group="Indicator Settings")
+int stochSmooth = input.int(3, "Stochastic Smooth", minval=1, group="Indicator Settings")
+float stochOversold = input.float(20, "Stochastic Oversold", minval=0, maxval=50, group="Indicator Settings")
+float stochOverbought = input.float(80, "Stochastic Overbought", minval=50, maxval=100, group="Indicator Settings")
+
+// Anti-Repaint Settings
+bool useConfirmedBars = input.bool(true, "Wait for Bar Close (Anti-Repaint)", group="Anti-Repaint Settings",
+     tooltip="Enable to prevent repainting - signals confirmed only after bar closes")
+bool useBarstateFilter = input.bool(false, "Additional Barstate Filter", group="Anti-Repaint Settings",
+     tooltip="Extra safety: only trigger on confirmed bars (use for live trading)")
+
+// Alert Settings
+int alertThreshold = input.int(3, "Confluence Alert Threshold", minval=1, maxval=12, group="Alert Settings",
+     tooltip="Minimum confluence score to trigger alert")
+
+// Display Settings
+bool showTable = input.bool(true, "Show Dashboard Table", group="Display Settings")
+string tablePosition = input.string("top_right", "Table Position",
+     options=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"],
+     group="Display Settings")
+bool showSignalLabels = input.bool(true, "Show Signal Labels on Chart", group="Display Settings")
+
+// Color Settings
+color bullColor = input.color(color.new(color.green, 0), "Bullish Color", group="Colors")
+color bearColor = input.color(color.new(color.red, 0), "Bearish Color", group="Colors")
+color neutralColor = input.color(color.new(color.gray, 50), "Neutral Color", group="Colors")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER FUNCTIONS (Inline versions of library functions for standalone use)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Convert timeframe to minutes
+f_tfToMinutes(string tf) =>
+    float minutes = 0.0
+    if na(tf) or tf == ""
+        minutes := timeframe.multiplier
+    else
+        string suffix = str.substring(tf, str.length(tf) - 1)
+        bool hasAlpha = not (suffix >= "0" and suffix <= "9")
+        int mult = hasAlpha ? str.tonumber(str.substring(tf, 0, str.length(tf) - 1)) : str.tonumber(tf)
+        if na(mult)
+            mult := 1
+        if hasAlpha
+            minutes := suffix == "S" ? mult / 60.0 : (suffix == "D" ? mult * 1440.0 : (suffix == "W" ? mult * 10080.0 : (suffix == "M" ? mult * 43200.0 : mult * 60.0)))
+        else
+            minutes := mult
+    minutes
+
+// Check if timeframe is higher than chart
+f_isHigherTF(string tf) =>
+    f_tfToMinutes(tf) > f_tfToMinutes(timeframe.period)
+
+// Safe request.security with anti-repaint
+f_safeRequest(string sym, string tf, float expr, bool confirmed) =>
+    request.security(sym, tf, confirmed ? expr[1] : expr, lookahead=barmerge.lookahead_off, gaps=barmerge.gaps_off)
+
+// RSI Signal: BUY=1, NEUTRAL=0, SELL=-1
+f_rsiSignal(float rsi, float oversold, float overbought) =>
+    int sig = 0
+    if not na(rsi)
+        sig := rsi <= oversold ? 1 : (rsi >= overbought ? -1 : 0)
+    sig
+
+// MACD Signal: BUY=1, NEUTRAL=0, SELL=-1
+f_macdSignal(float hist) =>
+    int sig = 0
+    if not na(hist)
+        sig := hist > 0 ? 1 : (hist < 0 ? -1 : 0)
+    sig
+
+// Stochastic Signal: BUY=1, NEUTRAL=0, SELL=-1
+f_stochSignal(float k, float d, float oversold, float overbought) =>
+    int sig = 0
+    if not na(k) and not na(d)
+        sig := k <= oversold and d <= oversold ? 1 : (k >= overbought and d >= overbought ? -1 : 0)
+    sig
+
+// Signal to string
+f_sigToStr(int sig) =>
+    sig == 1 ? "BUY" : (sig == -1 ? "SELL" : "NEUT")
+
+// Signal to color
+f_sigToColor(int sig, color bull, color bear, color neut) =>
+    sig == 1 ? bull : (sig == -1 ? bear : neut)
+
+// Format timeframe for display
+f_formatTF(string tf) =>
+    float mins = f_tfToMinutes(tf)
+    string lbl = tf
+    if mins >= 43200
+        lbl := str.tostring(math.round(mins / 43200)) + "M"
+    else if mins >= 10080
+        lbl := str.tostring(math.round(mins / 10080)) + "W"
+    else if mins >= 1440
+        lbl := str.tostring(math.round(mins / 1440)) + "D"
+    else if mins >= 60
+        lbl := str.tostring(math.round(mins / 60)) + "H"
+    else
+        lbl := str.tostring(math.round(mins)) + "m"
+    lbl
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CURRENT TIMEFRAME CALCULATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Calculate indicators on current timeframe
+float rsiCurrent = ta.rsi(close, rsiLength)
+[macdLine, signalLine, histogram] = ta.macd(close, macdFast, macdSlow, macdSignal)
+float stochKval = ta.stoch(close, high, low, stochK)
+float stochKsmooth = ta.sma(stochKval, stochSmooth)
+float stochDval = ta.sma(stochKsmooth, stochD)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MULTI-TIMEFRAME DATA RETRIEVAL
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Timeframe 1 Data
+var bool tf1Valid = f_isHigherTF(tf1)
+float rsi1 = tf1Valid ? f_safeRequest(syminfo.tickerid, tf1, rsiCurrent, useConfirmedBars) : rsiCurrent
+float hist1 = tf1Valid ? f_safeRequest(syminfo.tickerid, tf1, histogram, useConfirmedBars) : histogram
+float k1 = tf1Valid ? f_safeRequest(syminfo.tickerid, tf1, stochKsmooth, useConfirmedBars) : stochKsmooth
+float d1 = tf1Valid ? f_safeRequest(syminfo.tickerid, tf1, stochDval, useConfirmedBars) : stochDval
+
+// Timeframe 2 Data
+var bool tf2Valid = f_isHigherTF(tf2)
+float rsi2 = tf2Valid ? f_safeRequest(syminfo.tickerid, tf2, rsiCurrent, useConfirmedBars) : rsiCurrent
+float hist2 = tf2Valid ? f_safeRequest(syminfo.tickerid, tf2, histogram, useConfirmedBars) : histogram
+float k2 = tf2Valid ? f_safeRequest(syminfo.tickerid, tf2, stochKsmooth, useConfirmedBars) : stochKsmooth
+float d2 = tf2Valid ? f_safeRequest(syminfo.tickerid, tf2, stochDval, useConfirmedBars) : stochDval
+
+// Timeframe 3 Data
+var bool tf3Valid = f_isHigherTF(tf3)
+float rsi3 = tf3Valid ? f_safeRequest(syminfo.tickerid, tf3, rsiCurrent, useConfirmedBars) : rsiCurrent
+float hist3 = tf3Valid ? f_safeRequest(syminfo.tickerid, tf3, histogram, useConfirmedBars) : histogram
+float k3 = tf3Valid ? f_safeRequest(syminfo.tickerid, tf3, stochKsmooth, useConfirmedBars) : stochKsmooth
+float d3 = tf3Valid ? f_safeRequest(syminfo.tickerid, tf3, stochDval, useConfirmedBars) : stochDval
+
+// Timeframe 4 Data
+var bool tf4Valid = f_isHigherTF(tf4)
+float rsi4 = tf4Valid ? f_safeRequest(syminfo.tickerid, tf4, rsiCurrent, useConfirmedBars) : rsiCurrent
+float hist4 = tf4Valid ? f_safeRequest(syminfo.tickerid, tf4, histogram, useConfirmedBars) : histogram
+float k4 = tf4Valid ? f_safeRequest(syminfo.tickerid, tf4, stochKsmooth, useConfirmedBars) : stochKsmooth
+float d4 = tf4Valid ? f_safeRequest(syminfo.tickerid, tf4, stochDval, useConfirmedBars) : stochDval
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIGNAL GENERATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Timeframe 1 Signals
+int rsiSig1 = f_rsiSignal(rsi1, rsiOversold, rsiOverbought)
+int macdSig1 = f_macdSignal(hist1)
+int stochSig1 = f_stochSignal(k1, d1, stochOversold, stochOverbought)
+int tf1Score = rsiSig1 + macdSig1 + stochSig1
+
+// Timeframe 2 Signals
+int rsiSig2 = f_rsiSignal(rsi2, rsiOversold, rsiOverbought)
+int macdSig2 = f_macdSignal(hist2)
+int stochSig2 = f_stochSignal(k2, d2, stochOversold, stochOverbought)
+int tf2Score = rsiSig2 + macdSig2 + stochSig2
+
+// Timeframe 3 Signals
+int rsiSig3 = f_rsiSignal(rsi3, rsiOversold, rsiOverbought)
+int macdSig3 = f_macdSignal(hist3)
+int stochSig3 = f_stochSignal(k3, d3, stochOversold, stochOverbought)
+int tf3Score = rsiSig3 + macdSig3 + stochSig3
+
+// Timeframe 4 Signals
+int rsiSig4 = f_rsiSignal(rsi4, rsiOversold, rsiOverbought)
+int macdSig4 = f_macdSignal(hist4)
+int stochSig4 = f_stochSignal(k4, d4, stochOversold, stochOverbought)
+int tf4Score = rsiSig4 + macdSig4 + stochSig4
+
+// Total Confluence Score (sum of all timeframe scores)
+int totalConfluence = tf1Score + tf2Score + tf3Score + tf4Score
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// FINAL SIGNAL WITH BARSTATE FILTER
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Apply additional barstate filter if enabled (for live trading)
+bool barConfirmed = useBarstateFilter ? barstate.isconfirmed : true
+
+int finalSignal = 0
+if barConfirmed
+    if totalConfluence >= 3
+        finalSignal := 1  // Strong BUY
+    else if totalConfluence <= -3
+        finalSignal := -1  // Strong SELL
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DASHBOARD TABLE
+// ═══════════════════════════════════════════════════════════════════════════════
+
+if showTable and barstate.islast
+    // Create table
+    var table tbl = table.new(
+         position=tablePosition == "top_left" ? position.top_left :
+                  tablePosition == "top_center" ? position.top_center :
+                  tablePosition == "top_right" ? position.top_right :
+                  tablePosition == "middle_left" ? position.middle_left :
+                  tablePosition == "middle_center" ? position.middle_center :
+                  tablePosition == "middle_right" ? position.middle_right :
+                  tablePosition == "bottom_left" ? position.bottom_left :
+                  tablePosition == "bottom_center" ? position.bottom_center :
+                  position.bottom_right,
+         columns=5,
+         rows=6,
+         bgcolor=color.new(color.black, 85),
+         border_width=1,
+         border_color=color.new(color.gray, 50)
+     )
+
+    // Header Row
+    table.cell(tbl, 0, 0, "Timeframe", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+    table.cell(tbl, 1, 0, "RSI", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+    table.cell(tbl, 2, 0, "MACD", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+    table.cell(tbl, 3, 0, "Stoch", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+    table.cell(tbl, 4, 0, "Score", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.small)
+
+    // Timeframe 1 Row
+    table.cell(tbl, 0, 1, f_formatTF(tf1), text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 1, f_sigToStr(rsiSig1), text_color=f_sigToColor(rsiSig1, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 2, 1, f_sigToStr(macdSig1), text_color=f_sigToColor(macdSig1, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 3, 1, f_sigToStr(stochSig1), text_color=f_sigToColor(stochSig1, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 4, 1, str.tostring(tf1Score), text_color=f_sigToColor(tf1Score > 0 ? 1 : (tf1Score < 0 ? -1 : 0), bullColor, bearColor, neutralColor), text_size=size.small)
+
+    // Timeframe 2 Row
+    table.cell(tbl, 0, 2, f_formatTF(tf2), text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 2, f_sigToStr(rsiSig2), text_color=f_sigToColor(rsiSig2, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 2, 2, f_sigToStr(macdSig2), text_color=f_sigToColor(macdSig2, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 3, 2, f_sigToStr(stochSig2), text_color=f_sigToColor(stochSig2, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 4, 2, str.tostring(tf2Score), text_color=f_sigToColor(tf2Score > 0 ? 1 : (tf2Score < 0 ? -1 : 0), bullColor, bearColor, neutralColor), text_size=size.small)
+
+    // Timeframe 3 Row
+    table.cell(tbl, 0, 3, f_formatTF(tf3), text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 3, f_sigToStr(rsiSig3), text_color=f_sigToColor(rsiSig3, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 2, 3, f_sigToStr(macdSig3), text_color=f_sigToColor(macdSig3, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 3, 3, f_sigToStr(stochSig3), text_color=f_sigToColor(stochSig3, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 4, 3, str.tostring(tf3Score), text_color=f_sigToColor(tf3Score > 0 ? 1 : (tf3Score < 0 ? -1 : 0), bullColor, bearColor, neutralColor), text_size=size.small)
+
+    // Timeframe 4 Row
+    table.cell(tbl, 0, 4, f_formatTF(tf4), text_color=color.white, text_size=size.small)
+    table.cell(tbl, 1, 4, f_sigToStr(rsiSig4), text_color=f_sigToColor(rsiSig4, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 2, 4, f_sigToStr(macdSig4), text_color=f_sigToColor(macdSig4, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 3, 4, f_sigToStr(stochSig4), text_color=f_sigToColor(stochSig4, bullColor, bearColor, neutralColor), text_size=size.small)
+    table.cell(tbl, 4, 4, str.tostring(tf4Score), text_color=f_sigToColor(tf4Score > 0 ? 1 : (tf4Score < 0 ? -1 : 0), bullColor, bearColor, neutralColor), text_size=size.small)
+
+    // Total Confluence Row
+    table.cell(tbl, 0, 5, "TOTAL", text_color=color.white, bgcolor=color.new(color.blue, 70), text_size=size.normal)
+    table.cell(tbl, 1, 5, "", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 2, 5, "", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 3, 5, "", text_color=color.white, text_size=size.small)
+    table.cell(tbl, 4, 5, str.tostring(totalConfluence),
+         text_color=color.white,
+         bgcolor=f_sigToColor(totalConfluence >= 3 ? 1 : (totalConfluence <= -3 ? -1 : 0),
+                              color.new(bullColor, 50),
+                              color.new(bearColor, 50),
+                              color.new(neutralColor, 50)),
+         text_size=size.large)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHART LABELS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+if showSignalLabels and barConfirmed
+    if finalSignal == 1
+        label.new(bar_index, low, "BUY\n" + str.tostring(totalConfluence),
+             style=label.style_label_up,
+             color=bullColor,
+             textcolor=color.white,
+             size=size.small)
+    else if finalSignal == -1
+        label.new(bar_index, high, "SELL\n" + str.tostring(totalConfluence),
+             style=label.style_label_down,
+             color=bearColor,
+             textcolor=color.white,
+             size=size.small)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Bullish Alert (confluence reaches threshold)
+alertcondition(
+     totalConfluence >= alertThreshold and barConfirmed,
+     title="Bullish Confluence Alert",
+     message="{{ticker}}: Bullish confluence detected! Score: {{plot_0}}"
+ )
+
+// Bearish Alert (confluence reaches negative threshold)
+alertcondition(
+     totalConfluence <= -alertThreshold and barConfirmed,
+     title="Bearish Confluence Alert",
+     message="{{ticker}}: Bearish confluence detected! Score: {{plot_0}}"
+ )
+
+// Strong Confluence Alert (very high alignment)
+alertcondition(
+     math.abs(totalConfluence) >= alertThreshold * 2 and barConfirmed,
+     title="Strong Confluence Alert",
+     message="{{ticker}}: STRONG confluence detected! Score: {{plot_0}}"
+ )
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLOTS (for alerts and data inspection)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+plot(totalConfluence, "Total Confluence", color=color.new(color.blue, 100), display=display.data_window)
+plot(finalSignal, "Final Signal", color=color.new(color.orange, 100), display=display.data_window)
+plot(tf1Score, "TF1 Score", color=color.new(color.gray, 100), display=display.data_window)
+plot(tf2Score, "TF2 Score", color=color.new(color.gray, 100), display=display.data_window)
+plot(tf3Score, "TF3 Score", color=color.new(color.gray, 100), display=display.data_window)
+plot(tf4Score, "TF4 Score", color=color.new(color.gray, 100), display=display.data_window)

@@ -1,0 +1,330 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+
+// @description Library for multi-timeframe analysis with anti-repaint safeguards and optimized request.security() usage
+library("TimeFrameUtils", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIMEFRAME CONVERSION UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Converts TradingView timeframe string to minutes (robust for all formats)
+// @param tf Timeframe string (e.g., "1", "5", "15", "60", "240", "D", "W", "M")
+// @returns Number of minutes in the timeframe
+// @note Handles: seconds (S), minutes (no suffix), hours (H), days (D), weeks (W), months (M)
+export tfToMinutes(string tf) =>
+    float minutes = 0.0
+
+    // Handle empty/invalid input
+    if na(tf) or tf == ""
+        minutes := timeframe.multiplier
+    else
+        // Extract numeric value and suffix
+        string suffix = str.substring(tf, str.length(tf) - 1)
+        bool hasAlphaSuffix = not (suffix >= "0" and suffix <= "9")
+
+        int multiplier = hasAlphaSuffix ?
+             str.tonumber(str.substring(tf, 0, str.length(tf) - 1)) :
+             str.tonumber(tf)
+
+        // Default to 1 if extraction failed
+        if na(multiplier)
+            multiplier := 1
+
+        // Convert to minutes based on suffix
+        if hasAlphaSuffix
+            switch suffix
+                "S" => minutes := multiplier / 60.0      // Seconds
+                "D" => minutes := multiplier * 1440.0    // Days
+                "W" => minutes := multiplier * 10080.0   // Weeks (7 days)
+                "M" => minutes := multiplier * 43200.0   // Months (30 days avg)
+                => minutes := multiplier * 60.0          // Hours (H or other)
+        else
+            // No suffix = minutes
+            minutes := multiplier
+
+    minutes
+
+// @function Checks if target timeframe is higher than current chart timeframe
+// @param tf Target timeframe to check
+// @returns True if target TF is higher than chart TF (prevents lookahead issues)
+export isHigherTimeframe(string tf) =>
+    tfToMinutes(tf) > tfToMinutes(timeframe.period)
+
+// @function Validates if timeframe can be safely used for HTF analysis
+// @param tf Timeframe to validate
+// @returns True if timeframe is valid and higher than current
+export isValidHTF(string tf) =>
+    not na(tf) and tf != "" and isHigherTimeframe(tf)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ANTI-REPAINT REQUEST.SECURITY WRAPPERS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Safe request.security() call with anti-repaint settings
+// @param symbol Symbol to request data from
+// @param tf Timeframe for the request
+// @param expression Expression to evaluate
+// @returns Requested data with lookahead disabled
+export safeRequest(string symbol, string tf, float expression) =>
+    request.security(
+         symbol,
+         tf,
+         expression,
+         lookahead=barmerge.lookahead_off,
+         gaps=barmerge.gaps_off
+     )
+
+// @function Safe request.security() for confirmed bars only (no repaint)
+// @param symbol Symbol to request data from
+// @param tf Timeframe for the request
+// @param expression Expression to evaluate
+// @returns Requested data only after bar confirmation
+export confirmedRequest(string symbol, string tf, float expression) =>
+    request.security(
+         symbol,
+         tf,
+         expression[1],  // Use previous bar to ensure confirmation
+         lookahead=barmerge.lookahead_off,
+         gaps=barmerge.gaps_off
+     )
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// OPTIMIZED MULTI-INDICATOR REQUESTS (SINGLE CALL)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Requests RSI from higher timeframe (optimized)
+// @param tf Target timeframe
+// @param source Price source for RSI calculation
+// @param length RSI period
+// @param useConfirmed Wait for bar close if true
+// @returns RSI value from target timeframe
+export getRSI(string tf, float source, simple int length, bool useConfirmed = false) =>
+    float rsiValue = ta.rsi(source, length)
+
+    if isValidHTF(tf)
+        rsiValue := useConfirmed ?
+             confirmedRequest(syminfo.tickerid, tf, rsiValue) :
+             safeRequest(syminfo.tickerid, tf, rsiValue)
+
+    rsiValue
+
+// @function Requests MACD histogram from higher timeframe (optimized)
+// @param tf Target timeframe
+// @param source Price source for MACD
+// @param fast Fast period
+// @param slow Slow period
+// @param signal Signal period
+// @param useConfirmed Wait for bar close if true
+// @returns [macd, signal, histogram] tuple from target timeframe
+export getMACD(string tf, float source, simple int fast, simple int slow, simple int signal, bool useConfirmed = false) =>
+    [macdLine, signalLine, histogram] = ta.macd(source, fast, slow, signal)
+
+    float htfMacd = macdLine
+    float htfSignal = signalLine
+    float htfHist = histogram
+
+    if isValidHTF(tf)
+        if useConfirmed
+            htfMacd := confirmedRequest(syminfo.tickerid, tf, macdLine)
+            htfSignal := confirmedRequest(syminfo.tickerid, tf, signalLine)
+            htfHist := confirmedRequest(syminfo.tickerid, tf, histogram)
+        else
+            htfMacd := safeRequest(syminfo.tickerid, tf, macdLine)
+            htfSignal := safeRequest(syminfo.tickerid, tf, signalLine)
+            htfHist := safeRequest(syminfo.tickerid, tf, histogram)
+
+    [htfMacd, htfSignal, htfHist]
+
+// @function Requests Stochastic from higher timeframe (optimized)
+// @param tf Target timeframe
+// @param source Price source (typically close)
+// @param high High prices
+// @param low Low prices
+// @param kLength %K period
+// @param kSmooth %K smoothing
+// @param dLength %D period
+// @param useConfirmed Wait for bar close if true
+// @returns [k, d] tuple from target timeframe
+export getStochastic(string tf, float source, float high, float low, simple int kLength, simple int kSmooth, simple int dLength, bool useConfirmed = false) =>
+    float k = ta.stoch(source, high, low, kLength)
+    float smoothK = ta.sma(k, kSmooth)
+    float d = ta.sma(smoothK, dLength)
+
+    float htfK = smoothK
+    float htfD = d
+
+    if isValidHTF(tf)
+        if useConfirmed
+            htfK := confirmedRequest(syminfo.tickerid, tf, smoothK)
+            htfD := confirmedRequest(syminfo.tickerid, tf, d)
+        else
+            htfK := safeRequest(syminfo.tickerid, tf, smoothK)
+            htfD := safeRequest(syminfo.tickerid, tf, d)
+
+    [htfK, htfD]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE-OPTIMIZED TUPLE REQUESTS (MINIMIZES REQUEST.SECURITY CALLS)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Gets all three indicators (RSI, MACD, Stoch) in optimized single-pass
+// @param tf Target timeframe
+// @param source Price source
+// @param high High prices
+// @param low Low prices
+// @param rsiLen RSI period
+// @param macdFast MACD fast period
+// @param macdSlow MACD slow period
+// @param macdSig MACD signal period
+// @param stochK Stochastic %K period
+// @param stochSmooth Stochastic smoothing
+// @param stochD Stochastic %D period
+// @param useConfirmed Wait for bar close if true
+// @returns [rsi, macdHist, stochK, stochD] tuple - all indicators in one call
+export getAllIndicators(
+     string tf,
+     float source,
+     float high,
+     float low,
+     simple int rsiLen,
+     simple int macdFast,
+     simple int macdSlow,
+     simple int macdSig,
+     simple int stochK,
+     simple int stochSmooth,
+     simple int stochD,
+     bool useConfirmed = false
+ ) =>
+    // Calculate on current timeframe first
+    float rsi = ta.rsi(source, rsiLen)
+    [macdLine, signalLine, histogram] = ta.macd(source, macdFast, macdSlow, macdSig)
+    float k = ta.stoch(source, high, low, stochK)
+    float smoothK = ta.sma(k, stochSmooth)
+    float d = ta.sma(smoothK, stochD)
+
+    // If HTF requested, fetch in single optimized call
+    if isValidHTF(tf)
+        // Use tuple to minimize security calls (CRITICAL OPTIMIZATION)
+        [htfRsi, htfHist, htfK, htfD] = request.security(
+             syminfo.tickerid,
+             tf,
+             [rsi, histogram, smoothK, d],
+             lookahead=barmerge.lookahead_off,
+             gaps=barmerge.gaps_off
+         )
+
+        // Apply confirmation offset if needed
+        if useConfirmed
+            [htfRsi[1], htfHist[1], htfK[1], htfD[1]]
+        else
+            [htfRsi, htfHist, htfK, htfD]
+    else
+        [rsi, histogram, smoothK, d]
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DIVERGENCE DETECTION (ANTI-REPAINT FOCUSED)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Detects bullish divergence (price makes lower low, indicator makes higher low)
+// @param price Price series
+// @param indicator Indicator series (RSI, MACD, etc.)
+// @param lookback Bars to look back for pivot detection
+// @param threshold Minimum indicator difference to confirm divergence (reduces noise)
+// @returns 1 if bullish divergence detected, 0 otherwise
+// @note Uses confirmed pivots only - reduces false signals
+export detectBullishDivergence(float price, float indicator, simple int lookback, float threshold = 0) =>
+    int signal = 0
+
+    // Find pivot lows (confirmed)
+    bool pricePivotLow = ta.pivotlow(price, lookback, lookback)
+    bool indicatorPivotLow = ta.pivotlow(indicator, lookback, lookback)
+
+    if pricePivotLow and indicatorPivotLow
+        // Get previous pivot values
+        float prevPriceLow = ta.valuewhen(ta.pivotlow(price, lookback, lookback), price, 1)
+        float prevIndicatorLow = ta.valuewhen(ta.pivotlow(indicator, lookback, lookback), indicator, 1)
+
+        // Check divergence conditions
+        bool priceCondition = price[lookback] < prevPriceLow  // Lower low in price
+        bool indicatorCondition = indicator[lookback] > prevIndicatorLow + threshold  // Higher low in indicator
+
+        if priceCondition and indicatorCondition
+            signal := 1
+
+    signal
+
+// @function Detects bearish divergence (price makes higher high, indicator makes lower high)
+// @param price Price series
+// @param indicator Indicator series (RSI, MACD, etc.)
+// @param lookback Bars to look back for pivot detection
+// @param threshold Minimum indicator difference to confirm divergence (reduces noise)
+// @returns -1 if bearish divergence detected, 0 otherwise
+// @note Uses confirmed pivots only - reduces false signals
+export detectBearishDivergence(float price, float indicator, simple int lookback, float threshold = 0) =>
+    int signal = 0
+
+    // Find pivot highs (confirmed)
+    bool pricePivotHigh = ta.pivothigh(price, lookback, lookback)
+    bool indicatorPivotHigh = ta.pivothigh(indicator, lookback, lookback)
+
+    if pricePivotHigh and indicatorPivotHigh
+        // Get previous pivot values
+        float prevPriceHigh = ta.valuewhen(ta.pivothigh(price, lookback, lookback), price, 1)
+        float prevIndicatorHigh = ta.valuewhen(ta.pivothigh(indicator, lookback, lookback), indicator, 1)
+
+        // Check divergence conditions
+        bool priceCondition = price[lookback] > prevPriceHigh  // Higher high in price
+        bool indicatorCondition = indicator[lookback] < prevIndicatorHigh - threshold  // Lower high in indicator
+
+        if priceCondition and indicatorCondition
+            signal := -1
+
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PERFORMANCE MONITORING & LIMITS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Calculates approximate request.security() call count for multi-TF setup
+// @param numTimeframes Number of timeframes being analyzed
+// @param numIndicators Number of indicators per timeframe
+// @returns Estimated security call count
+// @note TradingView limit is typically 40 calls per script
+export estimateSecurityCalls(int numTimeframes, int numIndicators) =>
+    numTimeframes * numIndicators
+
+// @function Checks if configuration is within TradingView limits
+// @param numTimeframes Number of timeframes
+// @param numIndicators Number of indicators per timeframe
+// @returns True if within safe limits (< 35 to leave margin)
+export isWithinLimits(int numTimeframes, int numIndicators) =>
+    estimateSecurityCalls(numTimeframes, numIndicators) < 35
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TIMEFRAME FORMATTING & DISPLAY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Formats timeframe string for display (e.g., "60" -> "1H", "1440" -> "1D")
+// @param tf Timeframe string
+// @returns Human-readable timeframe label
+export formatTimeframe(string tf) =>
+    string label = tf
+    float mins = tfToMinutes(tf)
+
+    if mins >= 43200  // Months
+        label := str.tostring(math.round(mins / 43200)) + "M"
+    else if mins >= 10080  // Weeks
+        label := str.tostring(math.round(mins / 10080)) + "W"
+    else if mins >= 1440  // Days
+        label := str.tostring(math.round(mins / 1440)) + "D"
+    else if mins >= 60  // Hours
+        label := str.tostring(math.round(mins / 60)) + "H"
+    else if mins >= 1  // Minutes
+        label := str.tostring(math.round(mins)) + "m"
+    else  // Seconds
+        label := str.tostring(math.round(mins * 60)) + "s"
+
+    label

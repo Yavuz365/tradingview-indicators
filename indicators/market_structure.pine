@@ -1,0 +1,221 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+indicator("Market Structure", shorttitle="Market Structure", overlay=true, max_bars_back=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DESCRIPTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Automated market structure identification for swing trading:
+// - Swing Highs and Swing Lows detection
+// - Trend Classification (Uptrend/Downtrend/Ranging)
+// - Higher High (HH), Higher Low (HL) labels in uptrends
+// - Lower High (LH), Lower Low (LL) labels in downtrends
+// - Support and Resistance levels from structure
+// - Trend strength measurement
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Swing Detection Settings
+int swingLength = input.int(10, "Swing Detection Length", minval=3, maxval=50, group="Swing Settings",
+     tooltip="Bars to left and right for pivot detection")
+bool showSwingHighs = input.bool(true, "Show Swing Highs", group="Swing Settings")
+bool showSwingLows = input.bool(true, "Show Swing Lows", group="Swing Settings")
+bool connectSwings = input.bool(true, "Connect Swing Points", group="Swing Settings")
+
+// Structure Labels
+bool showHH = input.bool(true, "Show Higher High (HH)", group="Structure Labels")
+bool showHL = input.bool(true, "Show Higher Low (HL)", group="Structure Labels")
+bool showLH = input.bool(true, "Show Lower High (LH)", group="Structure Labels")
+bool showLL = input.bool(true, "Show Lower Low (LL)", group="Structure Labels")
+bool showEqualHighs = input.bool(true, "Show Equal Highs (EQH)", group="Structure Labels")
+bool showEqualLows = input.bool(true, "Show Equal Lows (EQL)", group="Structure Labels")
+
+// Trend Settings
+int trendLength = input.int(3, "Trend Confirmation Swings", minval=2, maxval=10, group="Trend Settings",
+     tooltip="Number of consecutive HH/HL or LH/LL to confirm trend")
+bool showTrendLine = input.bool(true, "Show Trend Direction Line", group="Trend Settings")
+bool showTrendZone = input.bool(false, "Show Trend Strength Zone", group="Trend Settings")
+
+// Support/Resistance Settings
+bool showSR = input.bool(true, "Show Support/Resistance Levels", group="Support & Resistance")
+int srTouchCount = input.int(2, "Min Touches for Valid S/R", minval=2, maxval=5, group="Support & Resistance")
+float srTolerance = input.float(0.5, "S/R Level Tolerance %", minval=0.1, maxval=2.0, step=0.1, group="Support & Resistance")
+int maxSRLevels = input.int(5, "Max S/R Levels to Display", minval=1, maxval=20, group="Support & Resistance")
+
+// Color Settings
+color hhColor = input.color(color.new(color.lime, 0), "HH Color", group="Colors")
+color hlColor = input.color(color.new(color.green, 0), "HL Color", group="Colors")
+color lhColor = input.color(color.new(color.orange, 0), "LH Color", group="Colors")
+color llColor = input.color(color.new(color.red, 0), "LL Color", group="Colors")
+color eqhColor = input.color(color.new(color.yellow, 50), "EQH Color", group="Colors")
+color eqlColor = input.color(color.new(color.purple, 50), "EQL Color", group="Colors")
+color uptrendColor = input.color(color.new(color.green, 80), "Uptrend Color", group="Colors")
+color downtrendColor = input.color(color.new(color.red, 80), "Downtrend Color", group="Colors")
+color supportColor = input.color(color.new(color.blue, 50), "Support Color", group="Colors")
+color resistanceColor = input.color(color.new(color.red, 50), "Resistance Color", group="Colors")
+
+// Alert Settings
+bool alertOnHH = input.bool(false, "Alert on Higher High", group="Alerts")
+bool alertOnLL = input.bool(false, "Alert on Lower Low", group="Alerts")
+bool alertOnTrendChange = input.bool(true, "Alert on Trend Change", group="Alerts")
+bool alertOnSRTouch = input.bool(true, "Alert on S/R Level Touch", group="Alerts")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: SWING HIGH/LOW DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Use ta.pivothigh() and ta.pivotlow() to identify swing points:
+// - Swing High: Local maximum with lower highs on both sides
+// - Swing Low: Local minimum with higher lows on both sides
+// - Store in arrays for comparison and labeling
+
+// TODO: Implement swing detection
+// - pivotHigh = ta.pivothigh(high, swingLength, swingLength)
+// - pivotLow = ta.pivotlow(low, swingLength, swingLength)
+// - Store bar_index and price in arrays
+// - Limit array size for performance
+// - Draw markers/labels at swing points
+
+var array<float> swingHighPrices = array.new<float>()
+var array<int> swingHighBars = array.new<int>()
+var array<float> swingLowPrices = array.new<float>()
+var array<int> swingLowBars = array.new<int>()
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: MARKET STRUCTURE CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Compare consecutive swings to determine structure:
+// - HH: Current swing high > previous swing high
+// - HL: Current swing low > previous swing low
+// - LH: Current swing high < previous swing high
+// - LL: Current swing low < previous swing low
+// - EQH/EQL: Swing within tolerance of previous swing
+
+// TODO: Implement structure comparison
+// - When new swing high: compare to last swing high
+// - When new swing low: compare to last swing low
+// - Label accordingly (HH, LH, EQH)
+// - Track structure sequence for trend determination
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: TREND CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Determine overall trend based on structure sequence:
+// - Uptrend: Series of HH and HL
+// - Downtrend: Series of LH and LL
+// - Ranging: Mixed structure, no clear pattern
+// - Trend strength: Consistency of structure
+
+// TODO: Implement trend classification
+// - Track last N swings (e.g., 3-5)
+// - Count HH/HL vs LH/LL
+// - If HH+HL >= trendLength: Uptrend
+// - If LH+LL >= trendLength: Downtrend
+// - Else: Ranging
+// - Update indicator panel or background color
+
+var string currentTrend = "Ranging"
+var int trendStrength = 0
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: SUPPORT/RESISTANCE LEVELS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Identify key S/R levels from swing points:
+// - Cluster swing lows near each other → Support
+// - Cluster swing highs near each other → Resistance
+// - Count touches (price tests) to validate strength
+// - Extend lines to right until broken
+
+// TODO: Implement S/R calculation
+// - Group swing highs/lows within tolerance
+// - Count how many times price touched level
+// - Keep only levels with >= srTouchCount touches
+// - Draw horizontal lines
+// - Monitor for breaks (invalidation)
+// - Update/delete lines dynamically
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER CALCULATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Simple pivot detection (placeholder)
+pivotHigh = ta.pivothigh(high, swingLength, swingLength)
+pivotLow = ta.pivotlow(low, swingLength, swingLength)
+
+// Trend estimation using moving averages (placeholder)
+float fastMA = ta.sma(close, 20)
+float slowMA = ta.sma(close, 50)
+
+if fastMA > slowMA
+    currentTrend := "Uptrend"
+else if fastMA < slowMA
+    currentTrend := "Downtrend"
+else
+    currentTrend := "Ranging"
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER VISUALIZATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Plot swing highs/lows
+plotshape(showSwingHighs and pivotHigh, "Swing High", shape.triangledown,
+     location.abovebar, resistanceColor, size=size.small, offset=-swingLength)
+plotshape(showSwingLows and pivotLow, "Swing Low", shape.triangleup,
+     location.belowbar, supportColor, size=size.small, offset=-swingLength)
+
+// Trend visualization (placeholder background color)
+bgcolor(showTrendZone and currentTrend == "Uptrend" ? uptrendColor : na, title="Uptrend Zone")
+bgcolor(showTrendZone and currentTrend == "Downtrend" ? downtrendColor : na, title="Downtrend Zone")
+
+// Trend indicator label
+if barstate.islast and showTrendLine
+    label.new(bar_index, high, currentTrend,
+         style=label.style_label_down,
+         color=currentTrend == "Uptrend" ? uptrendColor : (currentTrend == "Downtrend" ? downtrendColor : color.gray),
+         textcolor=color.white)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS (PLACEHOLDERS)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(alertOnHH and pivotHigh, title="Higher High Detected",
+     message="{{ticker}}: Potential Higher High at {{high}}")
+alertcondition(alertOnLL and pivotLow, title="Lower Low Detected",
+     message="{{ticker}}: Potential Lower Low at {{low}}")
+alertcondition(alertOnTrendChange and ta.change(currentTrend), title="Trend Change",
+     message="{{ticker}}: Trend changed to " + currentTrend)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPLEMENTATION NOTES
+// ═══════════════════════════════════════════════════════════════════════════════
+// This is a skeleton template. Complete implementation requires:
+// 1. Arrays to store swing high/low history (price + bar_index)
+// 2. Comparison logic to classify each new swing (HH/HL/LH/LL/EQ)
+// 3. Trend determination algorithm (sequence analysis)
+// 4. S/R level clustering with tolerance zones
+// 5. Line/label drawing for structure points
+// 6. Line management (extend, delete on break)
+// 7. Touch counting for S/R validation
+// 8. Trend strength calculation (consistency score)
+
+// Market Structure concepts:
+// - HH/HL = Bullish structure (look for longs)
+// - LH/LL = Bearish structure (look for shorts)
+// - EQH/EQL = Potential reversal or continuation (context-dependent)
+// - Structure breaks = Trend change signals
+// - S/R from structure = High-probability reaction zones
+
+// Trading applications:
+// - Enter pullbacks to HL in uptrend
+// - Enter rallies to LH in downtrend
+// - Break of structure = exit or reversal
+// - EQ levels = liquidity zones (potential stop hunts)
+
+// Performance considerations:
+// - Limit swing history to last 50-100 swings
+// - Use var arrays to persist data
+// - Delete old lines/labels beyond lookback
+// - Optimize comparison loops

@@ -1,0 +1,384 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+
+// @description Standardized signal generation library for technical indicators
+// Returns: BUY = 1, NEUTRAL = 0, SELL = -1
+library("CommonSignals", overlay=true)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIGNAL CONSTANTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export BUY = 1
+export NEUTRAL = 0
+export SELL = -1
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// RSI SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Generates standardized RSI signal
+// @param rsi RSI value (0-100)
+// @param oversold Oversold threshold (default 30)
+// @param overbought Overbought threshold (default 70)
+// @param useMiddleLine Use 50 level for neutral zone
+// @returns 1 (BUY), 0 (NEUTRAL), -1 (SELL)
+export rsiSignal(float rsi, float oversold = 30, float overbought = 70, bool useMiddleLine = false) =>
+    int signal = 0
+
+    if na(rsi)
+        signal := 0
+    else if rsi <= oversold
+        signal := 1  // BUY - oversold
+    else if rsi >= overbought
+        signal := -1  // SELL - overbought
+    else if useMiddleLine
+        // Use 50 as directional filter
+        signal := rsi > 50 ? 1 : (rsi < 50 ? -1 : 0)
+    else
+        signal := 0  // NEUTRAL
+
+    signal
+
+// @function Detects RSI crossover signals
+// @param rsi Current RSI value
+// @param level Level to check crossover (typically 30, 50, or 70)
+// @returns 1 if crosses above, -1 if crosses below, 0 otherwise
+export rsiCrossSignal(float rsi, float level) =>
+    int signal = 0
+
+    if not na(rsi) and not na(rsi[1])
+        bool crossUp = ta.crossover(rsi, level)
+        bool crossDown = ta.crossunder(rsi, level)
+
+        if crossUp
+            signal := 1
+        else if crossDown
+            signal := -1
+
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MACD SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Generates standardized MACD histogram signal
+// @param histogram MACD histogram value
+// @param threshold Minimum histogram value to generate signal (noise filter)
+// @returns 1 (BUY), 0 (NEUTRAL), -1 (SELL)
+export macdHistogramSignal(float histogram, float threshold = 0) =>
+    int signal = 0
+
+    if na(histogram)
+        signal := 0
+    else if histogram > threshold
+        signal := 1  // BUY - positive momentum
+    else if histogram < -threshold
+        signal := -1  // SELL - negative momentum
+    else
+        signal := 0  // NEUTRAL
+
+    signal
+
+// @function Generates MACD line crossover signal
+// @param macdLine MACD line value
+// @param signalLine Signal line value
+// @returns 1 if MACD crosses above signal, -1 if crosses below, 0 otherwise
+export macdCrossSignal(float macdLine, float signalLine) =>
+    int signal = 0
+
+    if not na(macdLine) and not na(signalLine) and not na(macdLine[1]) and not na(signalLine[1])
+        bool crossUp = ta.crossover(macdLine, signalLine)
+        bool crossDown = ta.crossunder(macdLine, signalLine)
+
+        if crossUp
+            signal := 1
+        else if crossDown
+            signal := -1
+
+    signal
+
+// @function Comprehensive MACD signal combining histogram and crossover
+// @param macdLine MACD line value
+// @param signalLine Signal line value
+// @param histogram MACD histogram value
+// @returns 1 (BUY), 0 (NEUTRAL), -1 (SELL)
+export macdComboSignal(float macdLine, float signalLine, float histogram) =>
+    int crossSignal = macdCrossSignal(macdLine, signalLine)
+    int histSignal = macdHistogramSignal(histogram, 0)
+
+    // Combine signals: both must agree or return neutral
+    int signal = crossSignal == histSignal ? crossSignal : 0
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STOCHASTIC SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Generates standardized Stochastic signal
+// @param k Stochastic %K value (0-100)
+// @param d Stochastic %D value (0-100)
+// @param oversold Oversold threshold (default 20)
+// @param overbought Overbought threshold (default 80)
+// @returns 1 (BUY), 0 (NEUTRAL), -1 (SELL)
+export stochSignal(float k, float d, float oversold = 20, float overbought = 80) =>
+    int signal = 0
+
+    if na(k) or na(d)
+        signal := 0
+    else if k <= oversold and d <= oversold
+        signal := 1  // BUY - oversold
+    else if k >= overbought and d >= overbought
+        signal := -1  // SELL - overbought
+    else
+        signal := 0  // NEUTRAL
+
+    signal
+
+// @function Detects Stochastic K/D crossover signals
+// @param k Stochastic %K value
+// @param d Stochastic %D value
+// @param oversold Oversold level (buy signals only below this)
+// @param overbought Overbought level (sell signals only above this)
+// @returns 1 if bullish cross in oversold, -1 if bearish cross in overbought, 0 otherwise
+export stochCrossSignal(float k, float d, float oversold = 20, float overbought = 80) =>
+    int signal = 0
+
+    if not na(k) and not na(d) and not na(k[1]) and not na(d[1])
+        bool bullishCross = ta.crossover(k, d)
+        bool bearishCross = ta.crossunder(k, d)
+
+        // Only signal crosses in extreme zones
+        if bullishCross and k < oversold
+            signal := 1
+        else if bearishCross and k > overbought
+            signal := -1
+
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MOVING AVERAGE SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Generates signal from price vs moving average
+// @param price Current price
+// @param ma Moving average value
+// @returns 1 if price above MA (bullish), -1 if below (bearish), 0 if equal
+export priceVsMASignal(float price, float ma) =>
+    int signal = 0
+
+    if na(price) or na(ma)
+        signal := 0
+    else if price > ma
+        signal := 1  // BUY - price above MA
+    else if price < ma
+        signal := -1  // SELL - price below MA
+
+    signal
+
+// @function Detects moving average crossover (Golden/Death cross)
+// @param fastMA Fast moving average
+// @param slowMA Slow moving average
+// @returns 1 if golden cross, -1 if death cross, 0 otherwise
+export maCrossSignal(float fastMA, float slowMA) =>
+    int signal = 0
+
+    if not na(fastMA) and not na(slowMA) and not na(fastMA[1]) and not na(slowMA[1])
+        bool goldenCross = ta.crossover(fastMA, slowMA)
+        bool deathCross = ta.crossunder(fastMA, slowMA)
+
+        if goldenCross
+            signal := 1
+        else if deathCross
+            signal := -1
+
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TREND SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Detects trend direction using higher highs/lows
+// @param length Lookback period for swing detection
+// @returns 1 (uptrend), -1 (downtrend), 0 (ranging)
+export trendSignal(simple int length = 10) =>
+    float highestHigh = ta.highest(high, length)
+    float lowestLow = ta.lowest(low, length)
+    float prevHighestHigh = ta.highest(high[1], length)
+    float prevLowestLow = ta.lowest(low[1], length)
+
+    int signal = 0
+
+    bool higherHigh = highestHigh > prevHighestHigh
+    bool higherLow = lowestLow > prevLowestLow
+    bool lowerHigh = highestHigh < prevHighestHigh
+    bool lowerLow = lowestLow < prevLowestLow
+
+    if higherHigh and higherLow
+        signal := 1  // Uptrend
+    else if lowerHigh and lowerLow
+        signal := -1  // Downtrend
+    else
+        signal := 0  // Ranging/unclear
+
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// VOLUME SIGNALS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Generates volume confirmation signal
+// @param vol Current volume
+// @param avgVol Average volume (e.g., SMA 20)
+// @param threshold Multiplier for significant volume (default 1.5x)
+// @returns 1 if volume significantly high, 0 otherwise
+export volumeConfirmSignal(float vol, float avgVol, float threshold = 1.5) =>
+    int signal = 0
+
+    if not na(vol) and not na(avgVol) and avgVol > 0
+        if vol > avgVol * threshold
+            signal := 1  // High volume confirmation
+
+    signal
+
+// @function Detects volume spike with directional bias
+// @param vol Current volume
+// @param avgVol Average volume
+// @param priceChange Price change (close - close[1])
+// @param threshold Volume spike threshold
+// @returns 1 if spike with up move, -1 if spike with down move, 0 otherwise
+export volumeSpikeSignal(float vol, float avgVol, float priceChange, float threshold = 2.0) =>
+    int signal = 0
+
+    if not na(vol) and not na(avgVol) and avgVol > 0 and not na(priceChange)
+        bool spike = vol > avgVol * threshold
+
+        if spike
+            if priceChange > 0
+                signal := 1  // Bullish volume spike
+            else if priceChange < 0
+                signal := -1  // Bearish volume spike
+
+    signal
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONFLUENCE & SCORING
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Calculates confluence score from multiple signals
+// @param signal1 First signal (-1, 0, 1)
+// @param signal2 Second signal (-1, 0, 1)
+// @param signal3 Third signal (-1, 0, 1)
+// @param signal4 Fourth signal (-1, 0, 1)
+// @returns Sum of all signals (confluence score)
+export confluenceScore(int signal1, int signal2, int signal3 = 0, int signal4 = 0) =>
+    signal1 + signal2 + signal3 + signal4
+
+// @function Converts confluence score to final signal
+// @param score Confluence score (sum of individual signals)
+// @param threshold Minimum score to trigger signal (default 2)
+// @returns 1 (BUY), -1 (SELL), 0 (NEUTRAL)
+export scoreToSignal(int score, int threshold = 2) =>
+    int signal = 0
+
+    if score >= threshold
+        signal := 1
+    else if score <= -threshold
+        signal := -1
+
+    signal
+
+// @function Counts number of bullish signals
+// @param signals Array of signal values
+// @returns Count of bullish signals (value = 1)
+export countBullish(array<int> signals) =>
+    int count = 0
+    int size = array.size(signals)
+
+    for i = 0 to size - 1
+        if array.get(signals, i) == 1
+            count += 1
+
+    count
+
+// @function Counts number of bearish signals
+// @param signals Array of signal values
+// @returns Count of bearish signals (value = -1)
+export countBearish(array<int> signals) =>
+    int count = 0
+    int size = array.size(signals)
+
+    for i = 0 to size - 1
+        if array.get(signals, i) == -1
+            count += 1
+
+    count
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SIGNAL FORMATTING & DISPLAY
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Converts signal to display string
+// @param signal Signal value (-1, 0, 1)
+// @returns "BUY", "NEUTRAL", or "SELL"
+export signalToString(int signal) =>
+    string text = "NEUTRAL"
+
+    if signal == 1
+        text := "BUY"
+    else if signal == -1
+        text := "SELL"
+
+    text
+
+// @function Gets color for signal display
+// @param signal Signal value (-1, 0, 1)
+// @param bullColor Color for buy signal (default green)
+// @param bearColor Color for sell signal (default red)
+// @param neutralColor Color for neutral (default gray)
+// @returns Appropriate color for signal
+export signalColor(int signal, color bullColor = color.green, color bearColor = color.red, color neutralColor = color.gray) =>
+    color c = neutralColor
+
+    if signal == 1
+        c := bullColor
+    else if signal == -1
+        c := bearColor
+
+    c
+
+// @function Converts signal to emoji for compact display
+// @param signal Signal value (-1, 0, 1)
+// @returns "🟢" (buy), "⚪" (neutral), "🔴" (sell)
+export signalEmoji(int signal) =>
+    string emoji = "⚪"
+
+    if signal == 1
+        emoji := "🟢"
+    else if signal == -1
+        emoji := "🔴"
+
+    emoji
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// STRENGTH CLASSIFICATION
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// @function Classifies signal strength
+// @param score Confluence score
+// @returns "STRONG", "MODERATE", "WEAK", or "NEUTRAL"
+export strengthLabel(int score) =>
+    string label = "NEUTRAL"
+
+    int absScore = math.abs(score)
+
+    if absScore >= 3
+        label := "STRONG"
+    else if absScore == 2
+        label := "MODERATE"
+    else if absScore == 1
+        label := "WEAK"
+
+    label

@@ -1,0 +1,166 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © YourUsername
+
+//@version=5
+indicator("Smart Money Concepts", shorttitle="SMC", overlay=true, max_bars_back=500)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// DESCRIPTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Smart Money Concepts (SMC) indicator for identifying institutional trading patterns:
+// - Order Blocks (OB): Last up/down candle before significant price moves
+// - Fair Value Gaps (FVG): Price imbalances where candles don't overlap
+// - Liquidity Sweeps: Stop hunts above/below key levels
+// - Break of Structure (BOS): Trend continuation signals
+// - Change of Character (CHoCH): Potential trend reversal signals
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// USER INPUTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Order Blocks Settings
+bool showOrderBlocks = input.bool(true, "Show Order Blocks", group="Order Blocks")
+int obLookback = input.int(10, "Order Block Lookback", minval=3, maxval=50, group="Order Blocks")
+color obBullishColor = input.color(color.new(color.green, 80), "Bullish OB Color", group="Order Blocks")
+color obBearishColor = input.color(color.new(color.red, 80), "Bearish OB Color", group="Order Blocks")
+int maxOrderBlocks = input.int(5, "Max Order Blocks to Display", minval=1, maxval=20, group="Order Blocks")
+
+// Fair Value Gap Settings
+bool showFVG = input.bool(true, "Show Fair Value Gaps", group="Fair Value Gaps")
+float fvgMinSize = input.float(0.001, "Minimum FVG Size (%)", minval=0.001, maxval=5.0, step=0.001, group="Fair Value Gaps")
+color fvgBullishColor = input.color(color.new(color.blue, 85), "Bullish FVG Color", group="Fair Value Gaps")
+color fvgBearishColor = input.color(color.new(color.orange, 85), "Bearish FVG Color", group="Fair Value Gaps")
+int maxFVG = input.int(10, "Max FVGs to Display", minval=1, maxval=50, group="Fair Value Gaps")
+bool fvgShowMidline = input.bool(true, "Show FVG Midline", group="Fair Value Gaps")
+
+// Liquidity Settings
+bool showLiquidity = input.bool(true, "Show Liquidity Levels", group="Liquidity")
+int liquidityLookback = input.int(20, "Liquidity Lookback Period", minval=10, maxval=100, group="Liquidity")
+color liquidityColor = input.color(color.new(color.purple, 50), "Liquidity Level Color", group="Liquidity")
+bool showSweeps = input.bool(true, "Show Liquidity Sweeps", group="Liquidity")
+float sweepTolerance = input.float(0.1, "Sweep Tolerance (%)", minval=0.01, maxval=2.0, step=0.01, group="Liquidity")
+
+// Structure Settings
+bool showBOS = input.bool(true, "Show Break of Structure (BOS)", group="Market Structure")
+bool showCHoCH = input.bool(true, "Show Change of Character (CHoCH)", group="Market Structure")
+int structureLookback = input.int(10, "Structure Swing Period", minval=3, maxval=50, group="Market Structure")
+color bosColor = input.color(color.new(color.green, 0), "BOS Color", group="Market Structure")
+color chochColor = input.color(color.new(color.red, 0), "CHoCH Color", group="Market Structure")
+
+// Alert Settings
+bool alertOnOB = input.bool(false, "Alert on New Order Block", group="Alerts")
+bool alertOnFVG = input.bool(false, "Alert on New Fair Value Gap", group="Alerts")
+bool alertOnSweep = input.bool(true, "Alert on Liquidity Sweep", group="Alerts")
+bool alertOnBOS = input.bool(true, "Alert on Break of Structure", group="Alerts")
+bool alertOnCHoCH = input.bool(true, "Alert on Change of Character", group="Alerts")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: ORDER BLOCKS DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Identify the last opposite-colored candle before a strong move:
+// - Bullish OB: Last bearish candle before uptrend breakout
+// - Bearish OB: Last bullish candle before downtrend breakdown
+// Store in arrays and draw boxes on chart
+
+// TODO: Implement order block detection logic
+// - Detect swing highs/lows using ta.pivothigh() and ta.pivotlow()
+// - Find last opposite candle before swing
+// - Draw box from open to close of OB candle
+// - Manage array to limit displayed boxes
+// - Mitigate (remove) OB when price returns and closes through it
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: FAIR VALUE GAPS (FVG) DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Identify price imbalances where candles don't overlap:
+// - Bullish FVG: high[2] < low (3-candle gap up)
+// - Bearish FVG: low[2] > high (3-candle gap down)
+// Draw boxes and optionally show midline (50% retracement)
+
+// TODO: Implement FVG detection logic
+// - Check for gaps in 3-candle patterns
+// - Calculate gap size as percentage
+// - Filter by minimum size
+// - Draw boxes for active FVGs
+// - Mitigate FVG when price fills 50% or 100%
+// - Optional: Draw midline for partial fills
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: LIQUIDITY LEVELS & SWEEPS
+// ═══════════════════════════════════════════════════════════════════════════════
+// Identify where stop losses likely cluster (swing highs/lows):
+// - Draw horizontal lines at recent swing extremes
+// - Detect when price "sweeps" through level and reverses quickly
+// - Liquidity sweep = wick through level + close back inside
+
+// TODO: Implement liquidity detection logic
+// - Identify swing highs/lows using pivots
+// - Draw horizontal lines at key levels
+// - Monitor for price spikes (wicks) through levels
+// - Detect quick reversals (sweep + rejection)
+// - Alert on confirmed sweeps
+// - Remove old/mitigated levels
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: BREAK OF STRUCTURE (BOS) DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Detect when price breaks previous swing high (uptrend) or low (downtrend):
+// - BOS confirms trend continuation
+// - Draw line from broken level with label
+// - Used to identify high-probability entries in trending markets
+
+// TODO: Implement BOS logic
+// - Track most recent swing highs/lows
+// - Detect when price closes above previous high (bullish BOS)
+// - Detect when price closes below previous low (bearish BOS)
+// - Draw lines and labels on chart
+// - Trigger alerts
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// TODO: CHANGE OF CHARACTER (CHoCH) DETECTION
+// ═══════════════════════════════════════════════════════════════════════════════
+// Detect potential trend reversals:
+// - In uptrend: Price breaks below previous higher low (CHoCH bearish)
+// - In downtrend: Price breaks above previous lower high (CHoCH bullish)
+// - Signals shift in market structure
+
+// TODO: Implement CHoCH logic
+// - Track internal structure (HH/HL in uptrend, LL/LH in downtrend)
+// - Detect structure breaks against trend
+// - Draw lines and labels differently from BOS
+// - Trigger alerts for potential reversals
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PLACEHOLDER VISUALIZATIONS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+// Example: Draw simple pivot points as placeholder
+pivotHigh = ta.pivothigh(high, structureLookback, structureLookback)
+pivotLow = ta.pivotlow(low, structureLookback, structureLookback)
+
+plotshape(showBOS and pivotHigh, "Pivot High", shape.triangledown, location.abovebar, color.new(color.red, 50), size=size.tiny)
+plotshape(showBOS and pivotLow, "Pivot Low", shape.triangleup, location.belowbar, color.new(color.green, 50), size=size.tiny)
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// ALERT CONDITIONS (PLACEHOLDERS)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+alertcondition(pivotHigh and alertOnBOS, title="Potential Swing High", message="{{ticker}}: New swing high detected")
+alertcondition(pivotLow and alertOnBOS, title="Potential Swing Low", message="{{ticker}}: New swing low detected")
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPLEMENTATION NOTES
+// ═══════════════════════════════════════════════════════════════════════════════
+// This is a skeleton template. Complete implementation requires:
+// 1. Arrays to store OB/FVG levels with box/line IDs
+// 2. State tracking for trend direction and internal structure
+// 3. Mitigation logic to remove invalidated levels
+// 4. Performance optimization (limit drawn objects)
+// 5. Comprehensive alert system
+// 6. Backtesting validation on multiple markets
+
+// References for SMC concepts:
+// - Order Blocks: Institutional accumulation/distribution zones
+// - FVG: Price inefficiencies to be filled (market seeking equilibrium)
+// - Liquidity Sweeps: Stop hunts before true directional move
+// - BOS/CHoCH: Market structure shifts (continuation vs reversal)

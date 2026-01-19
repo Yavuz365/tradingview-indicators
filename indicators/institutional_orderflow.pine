@@ -1,0 +1,309 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Yavuz365
+
+//@version=5
+indicator("Institutional Order Flow", overlay=true, max_bars_back=500, max_lines_count=500, max_boxes_count=500, max_labels_count=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Order Block Settings
+show_ob = input.bool(true, "Show Order Blocks", group="Order Blocks")
+ob_lookback = input.int(20, "Order Block Lookback", minval=5, maxval=100, group="Order Blocks")
+ob_min_volume = input.float(1.5, "Min Volume Multiplier", minval=1.0, maxval=5.0, group="Order Blocks")
+max_ob_zones = input.int(10, "Max Order Block Zones", minval=1, maxval=50, group="Order Blocks")
+
+// Fair Value Gap Settings
+show_fvg = input.bool(true, "Show Fair Value Gaps", group="Fair Value Gaps")
+fvg_threshold = input.float(0.3, "FVG Min Size %", minval=0.1, maxval=5.0, group="Fair Value Gaps")
+extend_fvg = input.bool(true, "Extend FVG Boxes", group="Fair Value Gaps")
+max_fvg = input.int(20, "Max FVG Boxes", minval=1, maxval=100, group="Fair Value Gaps")
+
+// Liquidity Settings
+show_liquidity = input.bool(true, "Show Liquidity Sweeps", group="Liquidity")
+liquidity_lookback = input.int(50, "Liquidity Lookback", minval=10, maxval=200, group="Liquidity")
+wick_threshold = input.float(0.5, "Wick Size %", minval=0.1, maxval=2.0, group="Liquidity")
+
+// Market Structure Settings
+show_structure = input.bool(true, "Show BOS/CHoCH", group="Market Structure")
+swing_length = input.int(5, "Swing Detection Length", minval=3, maxval=20, group="Market Structure")
+structure_labels = input.bool(true, "Show Structure Labels", group="Market Structure")
+
+// Colors
+ob_bull_color = input.color(color.new(color.green, 85), "Bullish Order Block", group="Colors")
+ob_bear_color = input.color(color.new(color.red, 85), "Bearish Order Block", group="Colors")
+fvg_bull_color = input.color(color.new(color.aqua, 80), "Bullish FVG", group="Colors")
+fvg_bear_color = input.color(color.new(color.orange, 80), "Bearish FVG", group="Colors")
+
+// ============================================================================
+// ORDER BLOCKS DETECTION
+// ============================================================================
+
+// Function to identify bullish order block
+f_is_bullish_ob(idx) =>
+    // Bullish OB: Strong bullish candle that led to price increase
+    body_size = close[idx] - open[idx]
+    candle_range = high[idx] - low[idx]
+    
+    is_bullish = close[idx] > open[idx]
+    strong_body = body_size > candle_range * 0.6
+    high_volume = volume[idx] > ta.sma(volume, 20)[idx] * ob_min_volume
+    led_to_rally = close > high[idx]
+    
+    is_bullish and strong_body and high_volume and led_to_rally
+
+// Function to identify bearish order block
+f_is_bearish_ob(idx) =>
+    // Bearish OB: Strong bearish candle that led to price decrease
+    body_size = open[idx] - close[idx]
+    candle_range = high[idx] - low[idx]
+    
+    is_bearish = close[idx] < open[idx]
+    strong_body = body_size > candle_range * 0.6
+    high_volume = volume[idx] > ta.sma(volume, 20)[idx] * ob_min_volume
+    led_to_drop = close < low[idx]
+    
+    is_bearish and strong_body and high_volume and led_to_drop
+
+// Store order blocks
+var box[] bullish_ob_array = array.new_box()
+var box[] bearish_ob_array = array.new_box()
+
+if show_ob and bar_index % 5 == 0  // Check every 5 bars for performance
+    // Detect bullish order blocks
+    for i = 1 to math.min(ob_lookback, bar_index - 1)
+        if f_is_bullish_ob(i)
+            // Check if price hasn't broken below the OB low
+            bool still_valid = true
+            for j = i - 1 to 0
+                if low[j] < low[i]
+                    still_valid := false
+                    break
+            
+            if still_valid and array.size(bullish_ob_array) < max_ob_zones
+                ob_box = box.new(
+                     left=bar_index - i,
+                     top=high[i],
+                     right=bar_index + 50,
+                     bottom=low[i],
+                     border_color=color.new(color.green, 60),
+                     bgcolor=ob_bull_color,
+                     border_width=1,
+                     extend=extend.right
+                 )
+                array.push(bullish_ob_array, ob_box)
+                break
+    
+    // Detect bearish order blocks
+    for i = 1 to math.min(ob_lookback, bar_index - 1)
+        if f_is_bearish_ob(i)
+            // Check if price hasn't broken above the OB high
+            bool still_valid = true
+            for j = i - 1 to 0
+                if high[j] > high[i]
+                    still_valid := false
+                    break
+            
+            if still_valid and array.size(bearish_ob_array) < max_ob_zones
+                ob_box = box.new(
+                     left=bar_index - i,
+                     top=high[i],
+                     right=bar_index + 50,
+                     bottom=low[i],
+                     border_color=color.new(color.red, 60),
+                     bgcolor=ob_bear_color,
+                     border_width=1,
+                     extend=extend.right
+                 )
+                array.push(bearish_ob_array, ob_box)
+                break
+
+// ============================================================================
+// FAIR VALUE GAPS (FVG)
+// ============================================================================
+
+// Bullish FVG: Gap between previous high and current low
+bullish_fvg = low > high[2] and (low - high[2]) / high[2] * 100 > fvg_threshold
+fvg_bull_top = bullish_fvg ? low : na
+fvg_bull_bottom = bullish_fvg ? high[2] : na
+
+// Bearish FVG: Gap between previous low and current high
+bearish_fvg = high < low[2] and (low[2] - high) / low[2] * 100 > fvg_threshold
+fvg_bear_top = bearish_fvg ? low[2] : na
+fvg_bear_bottom = bearish_fvg ? high : na
+
+var box[] fvg_array = array.new_box()
+
+if show_fvg
+    // Create bullish FVG box
+    if bullish_fvg and array.size(fvg_array) < max_fvg
+        fvg_box = box.new(
+             left=bar_index - 2,
+             top=fvg_bull_top,
+             right=extend_fvg ? bar_index + 50 : bar_index,
+             bottom=fvg_bull_bottom,
+             border_color=color.new(color.aqua, 50),
+             bgcolor=fvg_bull_color,
+             border_width=1,
+             extend=extend_fvg ? extend.right : extend.none
+         )
+        array.push(fvg_array, fvg_box)
+    
+    // Create bearish FVG box
+    if bearish_fvg and array.size(fvg_array) < max_fvg
+        fvg_box = box.new(
+             left=bar_index - 2,
+             top=fvg_bear_top,
+             right=extend_fvg ? bar_index + 50 : bar_index,
+             bottom=fvg_bear_bottom,
+             border_color=color.new(color.orange, 50),
+             bgcolor=fvg_bear_color,
+             border_width=1,
+             extend=extend_fvg ? extend.right : extend.none
+         )
+        array.push(fvg_array, fvg_box)
+
+// ============================================================================
+// LIQUIDITY SWEEPS
+// ============================================================================
+
+// Detect swing highs and lows for liquidity pools
+swing_high = ta.pivothigh(high, swing_length, swing_length)
+swing_low = ta.pivotlow(low, swing_length, swing_length)
+
+var line[] swing_high_lines = array.new_line()
+var line[] swing_low_lines = array.new_line()
+var label[] liquidity_labels = array.new_label()
+
+if show_liquidity
+    // Mark swing highs as liquidity pools
+    if not na(swing_high)
+        if array.size(swing_high_lines) < 20
+            swing_line = line.new(
+                 x1=bar_index - swing_length,
+                 y1=swing_high,
+                 x2=bar_index,
+                 y2=swing_high,
+                 color=color.new(color.red, 50),
+                 width=1,
+                 style=line.style_dashed,
+                 extend=extend.right
+             )
+            array.push(swing_high_lines, swing_line)
+    
+    // Mark swing lows as liquidity pools
+    if not na(swing_low)
+        if array.size(swing_low_lines) < 20
+            swing_line = line.new(
+                 x1=bar_index - swing_length,
+                 y1=swing_low,
+                 x2=bar_index,
+                 y2=swing_low,
+                 color=color.new(color.green, 50),
+                 width=1,
+                 style=line.style_dashed,
+                 extend=extend.right
+             )
+            array.push(swing_low_lines, swing_line)
+    
+    // Detect liquidity sweep (stop hunt)
+    // Bullish sweep: Price wicks below swing low then closes above
+    wick_below = low < ta.lowest(low[swing_length], liquidity_lookback)[swing_length] and 
+                 close > open and 
+                 (low - close) / close * 100 > wick_threshold
+    
+    // Bearish sweep: Price wicks above swing high then closes below
+    wick_above = high > ta.highest(high[swing_length], liquidity_lookback)[swing_length] and 
+                 close < open and 
+                 (high - close) / close * 100 > wick_threshold
+    
+    if wick_below and array.size(liquidity_labels) < 30
+        sweep_label = label.new(
+             x=bar_index,
+             y=low,
+             text="💎 Liquidity Sweep",
+             style=label.style_label_up,
+             color=color.new(color.green, 20),
+             textcolor=color.white,
+             size=size.small
+         )
+        array.push(liquidity_labels, sweep_label)
+    
+    if wick_above and array.size(liquidity_labels) < 30
+        sweep_label = label.new(
+             x=bar_index,
+             y=high,
+             text="💎 Liquidity Sweep",
+             style=label.style_label_down,
+             color=color.new(color.red, 20),
+             textcolor=color.white,
+             size=size.small
+         )
+        array.push(liquidity_labels, sweep_label)
+
+// ============================================================================
+// BREAK OF STRUCTURE (BOS) AND CHANGE OF CHARACTER (CHoCH)
+// ============================================================================
+
+var float last_hh = na
+var float last_ll = na
+var int last_hh_bar = 0
+var int last_ll_bar = 0
+var bool uptrend = true
+
+// Update swing points
+if not na(swing_high)
+    if na(last_hh) or swing_high > last_hh
+        last_hh := swing_high
+        last_hh_bar := bar_index - swing_length
+
+if not na(swing_low)
+    if na(last_ll) or swing_low < last_ll
+        last_ll := swing_low
+        last_ll_bar := bar_index - swing_length
+
+// Detect BOS (Break of Structure) - continuation
+bos_bull = show_structure and not na(last_hh) and close > last_hh and close[1] <= last_hh and uptrend
+bos_bear = show_structure and not na(last_ll) and close < last_ll and close[1] >= last_ll and not uptrend
+
+// Detect CHoCH (Change of Character) - reversal
+choch_bull = show_structure and not na(last_ll) and close > last_hh and not uptrend
+choch_bear = show_structure and not na(last_hh) and close < last_ll and uptrend
+
+// Update trend
+if choch_bull
+    uptrend := true
+if choch_bear
+    uptrend := false
+
+// ============================================================================
+// PLOTTING
+// ============================================================================
+
+// Plot BOS signals
+plotshape(bos_bull, "BOS Bullish", shape.triangleup, location.belowbar, 
+         color.new(color.lime, 0), text="BOS", size=size.small)
+plotshape(bos_bear, "BOS Bearish", shape.triangledown, location.abovebar, 
+         color.new(color.red, 0), text="BOS", size=size.small)
+
+// Plot CHoCH signals
+plotshape(choch_bull, "CHoCH Bullish", shape.circle, location.belowbar, 
+         color.new(color.green, 30), text="CHoCH", size=size.tiny)
+plotshape(choch_bear, "CHoCH Bearish", shape.circle, location.abovebar, 
+         color.new(color.maroon, 30), text="CHoCH", size=size.tiny)
+
+// Plot FVG markers
+plotchar(bullish_fvg, "Bullish FVG", "▲", location.belowbar, color.new(color.aqua, 0), size=size.tiny)
+plotchar(bearish_fvg, "Bearish FVG", "▼", location.abovebar, color.new(color.orange, 0), size=size.tiny)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(bos_bull, "Bullish BOS", "Bullish Break of Structure on {{ticker}}")
+alertcondition(bos_bear, "Bearish BOS", "Bearish Break of Structure on {{ticker}}")
+alertcondition(choch_bull, "Bullish CHoCH", "Bullish Change of Character on {{ticker}}")
+alertcondition(choch_bear, "Bearish CHoCH", "Bearish Change of Character on {{ticker}}")
+alertcondition(bullish_fvg, "Bullish FVG", "Bullish Fair Value Gap detected on {{ticker}}")
+alertcondition(bearish_fvg, "Bearish FVG", "Bearish Fair Value Gap detected on {{ticker}}")

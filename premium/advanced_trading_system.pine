@@ -1,0 +1,549 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Yavuz365
+
+//@version=5
+indicator("Advanced Trading System - Premium", overlay=true, max_bars_back=5000, max_lines_count=500, max_labels_count=500, max_boxes_count=500)
+
+// ============================================================================
+// INPUT SETTINGS
+// ============================================================================
+
+// MTF Confluence Scanner Settings
+var g1 = "═══════════════ MTF Confluence Scanner ═══════════════"
+mtf_enabled = input.bool(true, "Enable MTF Scanner", group=g1)
+mtf_tf1 = input.timeframe("15", "Timeframe 1", group=g1)
+mtf_tf2 = input.timeframe("60", "Timeframe 2", group=g1)
+mtf_tf3 = input.timeframe("240", "Timeframe 3", group=g1)
+rsi_length = input.int(14, "RSI Length", minval=1, group=g1)
+rsi_ob = input.int(70, "RSI Overbought", minval=50, maxval=100, group=g1)
+rsi_os = input.int(30, "RSI Oversold", minval=0, maxval=50, group=g1)
+macd_fast = input.int(12, "MACD Fast", minval=1, group=g1)
+macd_slow = input.int(26, "MACD Slow", minval=1, group=g1)
+macd_signal = input.int(9, "MACD Signal", minval=1, group=g1)
+stoch_k = input.int(14, "Stochastic %K", minval=1, group=g1)
+stoch_d = input.int(3, "Stochastic %D", minval=1, group=g1)
+stoch_smooth = input.int(3, "Stochastic Smooth", minval=1, group=g1)
+
+// Institutional Order Flow Settings
+var g2 = "═══════════════ Institutional Order Flow ═══════════════"
+orderflow_enabled = input.bool(true, "Enable Order Flow", group=g2)
+ob_lookback = input.int(20, "Order Block Lookback", minval=5, group=g2)
+fvg_threshold = input.float(0.5, "FVG Threshold %", minval=0.1, maxval=5.0, group=g2)
+show_orderblocks = input.bool(true, "Show Order Blocks", group=g2)
+show_fvg = input.bool(true, "Show Fair Value Gaps", group=g2)
+show_bos = input.bool(true, "Show BOS/CHoCH", group=g2)
+
+// Volume Profile Settings
+var g3 = "═══════════════ Volume Profile ═══════════════"
+volume_enabled = input.bool(true, "Enable Volume Profile", group=g3)
+vp_rows = input.int(24, "Volume Profile Rows", minval=10, maxval=100, group=g3)
+session_type = input.string("D", "Session Type", options=["D", "W", "M"], group=g3)
+show_poc = input.bool(true, "Show POC", group=g3)
+show_vah_val = input.bool(true, "Show VAH/VAL", group=g3)
+
+// Market Structure Settings
+var g4 = "═══════════════ Market Structure ═══════════════"
+structure_enabled = input.bool(true, "Enable Market Structure", group=g4)
+swing_length = input.int(5, "Swing Detection Length", minval=3, group=g4)
+show_swings = input.bool(true, "Show Swing Points", group=g4)
+show_structure_breaks = input.bool(true, "Show Structure Breaks", group=g4)
+
+// Support/Resistance Settings
+var g5 = "═══════════════ Dynamic Support/Resistance ═══════════════"
+sr_enabled = input.bool(true, "Enable S/R Zones", group=g5)
+sr_lookback = input.int(100, "S/R Lookback Period", minval=20, group=g5)
+sr_touch_tolerance = input.float(0.5, "Touch Tolerance %", minval=0.1, maxval=2.0, group=g5)
+max_sr_zones = input.int(5, "Max S/R Zones", minval=1, maxval=10, group=g5)
+
+// Multi-Symbol Dashboard Settings
+var g6 = "═══════════════ Multi-Symbol Dashboard ═══════════════"
+dashboard_enabled = input.bool(true, "Enable Dashboard", group=g6)
+symbol1 = input.symbol("BTCUSD", "Symbol 1", group=g6)
+symbol2 = input.symbol("ETHUSD", "Symbol 2", group=g6)
+symbol3 = input.symbol("BNBUSD", "Symbol 3", group=g6)
+dashboard_position = input.string("top_right", "Dashboard Position", options=["top_left", "top_right", "bottom_left", "bottom_right"], group=g6)
+
+// Alert Settings
+var g7 = "═══════════════ Alerts & Risk Management ═══════════════"
+enable_alerts = input.bool(true, "Enable Alerts", group=g7)
+alert_confluence = input.bool(true, "Alert on Confluence Signal", group=g7)
+alert_orderflow = input.bool(true, "Alert on Order Flow Signal", group=g7)
+risk_percent = input.float(2.0, "Risk % per Trade", minval=0.1, maxval=10.0, group=g7)
+reward_risk_ratio = input.float(2.0, "Reward:Risk Ratio", minval=1.0, maxval=10.0, group=g7)
+
+// Colors
+var g8 = "═══════════════ Colors ═══════════════"
+bullish_color = input.color(color.new(color.green, 0), "Bullish", group=g8)
+bearish_color = input.color(color.new(color.red, 0), "Bearish", group=g8)
+neutral_color = input.color(color.new(color.gray, 0), "Neutral", group=g8)
+fvg_bull_color = input.color(color.new(color.green, 80), "FVG Bullish", group=g8)
+fvg_bear_color = input.color(color.new(color.red, 80), "FVG Bearish", group=g8)
+
+// ============================================================================
+// MTF CONFLUENCE SCANNER
+// ============================================================================
+
+// RSI Divergence Detection
+rsi_value = ta.rsi(close, rsi_length)
+
+// Function to detect divergence
+f_detect_divergence(price_high, price_low, indicator_high, indicator_low, lookback) =>
+    bool bull_div = false
+    bool bear_div = false
+    
+    // Bullish Divergence: Price makes lower low, indicator makes higher low
+    if price_low < price_low[lookback] and indicator_low > indicator_low[lookback]
+        bull_div := true
+    
+    // Bearish Divergence: Price makes higher high, indicator makes lower high
+    if price_high > price_high[lookback] and indicator_high < indicator_high[lookback]
+        bear_div := true
+    
+    [bull_div, bear_div]
+
+// MACD Calculation
+[macd_line, signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// Stochastic Calculation
+stoch_k_value = ta.stoch(close, high, low, stoch_k)
+stoch_d_value = ta.sma(stoch_k_value, stoch_d)
+
+// Multi-timeframe RSI
+rsi_tf1 = request.security(syminfo.tickerid, mtf_tf1, rsi_value, lookahead=barmerge.lookahead_off)
+rsi_tf2 = request.security(syminfo.tickerid, mtf_tf2, rsi_value, lookahead=barmerge.lookahead_off)
+rsi_tf3 = request.security(syminfo.tickerid, mtf_tf3, rsi_value, lookahead=barmerge.lookahead_off)
+
+// Multi-timeframe MACD
+macd_tf1 = request.security(syminfo.tickerid, mtf_tf1, macd_hist, lookahead=barmerge.lookahead_off)
+macd_tf2 = request.security(syminfo.tickerid, mtf_tf2, macd_hist, lookahead=barmerge.lookahead_off)
+macd_tf3 = request.security(syminfo.tickerid, mtf_tf3, macd_hist, lookahead=barmerge.lookahead_off)
+
+// Confluence Logic
+mtf_bullish_confluence = mtf_enabled and rsi_tf1 < rsi_os and rsi_tf2 < rsi_os and macd_tf1 > 0 and macd_tf2 > 0
+mtf_bearish_confluence = mtf_enabled and rsi_tf1 > rsi_ob and rsi_tf2 > rsi_ob and macd_tf1 < 0 and macd_tf2 < 0
+
+// ============================================================================
+// INSTITUTIONAL ORDER FLOW
+// ============================================================================
+
+// Order Blocks Detection
+f_is_bullish_ob(index) =>
+    close[index] > open[index] and 
+    high[index] - close[index] < (high[index] - low[index]) * 0.3 and
+    volume[index] > ta.sma(volume, 20)[index]
+
+f_is_bearish_ob(index) =>
+    close[index] < open[index] and 
+    close[index] - low[index] < (high[index] - low[index]) * 0.3 and
+    volume[index] > ta.sma(volume, 20)[index]
+
+var box[] bullish_ob_boxes = array.new_box()
+var box[] bearish_ob_boxes = array.new_box()
+
+if orderflow_enabled and show_orderblocks
+    // Detect bullish order blocks
+    for i = 1 to ob_lookback
+        if f_is_bullish_ob(i) and close[i] < low
+            if array.size(bullish_ob_boxes) < 10
+                ob_box = box.new(bar_index - i, low[i], bar_index, high[i], 
+                     border_color=color.new(bullish_color, 70), 
+                     bgcolor=color.new(bullish_color, 90),
+                     border_width=1)
+                array.push(bullish_ob_boxes, ob_box)
+    
+    // Detect bearish order blocks
+    for i = 1 to ob_lookback
+        if f_is_bearish_ob(i) and close[i] > high
+            if array.size(bearish_ob_boxes) < 10
+                ob_box = box.new(bar_index - i, low[i], bar_index, high[i], 
+                     border_color=color.new(bearish_color, 70), 
+                     bgcolor=color.new(bearish_color, 90),
+                     border_width=1)
+                array.push(bearish_ob_boxes, ob_box)
+
+// Fair Value Gaps (FVG) Detection
+fvg_bull = show_fvg and low > high[2] and (low - high[2]) / high[2] * 100 > fvg_threshold
+fvg_bear = show_fvg and high < low[2] and (low[2] - high) / low[2] * 100 > fvg_threshold
+
+var box[] fvg_boxes = array.new_box()
+
+if orderflow_enabled and fvg_bull
+    if array.size(fvg_boxes) < 20
+        fvg_box = box.new(bar_index - 2, high[2], bar_index, low, 
+             border_color=color.new(fvg_bull_color, 50), 
+             bgcolor=fvg_bull_color,
+             border_width=1)
+        array.push(fvg_boxes, fvg_box)
+
+if orderflow_enabled and fvg_bear
+    if array.size(fvg_boxes) < 20
+        fvg_box = box.new(bar_index - 2, high, bar_index, low[2], 
+             border_color=color.new(fvg_bear_color, 50), 
+             bgcolor=fvg_bear_color,
+             border_width=1)
+        array.push(fvg_boxes, fvg_box)
+
+// Break of Structure (BOS) and Change of Character (CHoCH)
+var float last_swing_high = na
+var float last_swing_low = na
+var int last_high_bar = 0
+var int last_low_bar = 0
+
+swing_high = ta.pivothigh(high, swing_length, swing_length)
+swing_low = ta.pivotlow(low, swing_length, swing_length)
+
+if not na(swing_high)
+    last_swing_high := swing_high
+    last_high_bar := bar_index - swing_length
+
+if not na(swing_low)
+    last_swing_low := swing_low
+    last_low_bar := bar_index - swing_length
+
+// BOS Detection
+bos_bullish = show_bos and not na(last_swing_high) and close > last_swing_high and close[1] <= last_swing_high
+bos_bearish = show_bos and not na(last_swing_low) and close < last_swing_low and close[1] >= last_swing_low
+
+// CHoCH Detection
+choch_bullish = show_bos and not na(last_swing_low) and close > last_swing_high and high[1] < last_swing_high
+choch_bearish = show_bos and not na(last_swing_high) and close < last_swing_low and low[1] > last_swing_low
+
+// ============================================================================
+// VOLUME PROFILE
+// ============================================================================
+
+// Session-based Volume Profile
+var float[] vp_prices = array.new_float()
+var float[] vp_volumes = array.new_float()
+var float session_high = na
+var float session_low = na
+var bool new_session = false
+
+// Detect new session
+new_session := ta.change(time(session_type))
+
+if new_session or bar_index == 0
+    array.clear(vp_prices)
+    array.clear(vp_volumes)
+    session_high := high
+    session_low := low
+else
+    session_high := math.max(session_high, high)
+    session_low := math.min(session_low, low)
+
+// Build volume profile
+if volume_enabled and not na(session_high) and not na(session_low)
+    price_range = session_high - session_low
+    row_size = price_range / vp_rows
+    
+    for i = 0 to vp_rows - 1
+        row_price = session_low + (i + 0.5) * row_size
+        if close >= session_low + i * row_size and close < session_low + (i + 1) * row_size
+            if array.size(vp_volumes) <= i
+                array.push(vp_prices, row_price)
+                array.push(vp_volumes, volume)
+            else
+                array.set(vp_volumes, i, array.get(vp_volumes, i) + volume)
+
+// Calculate POC, VAH, VAL
+var float poc_price = na
+var float vah_price = na
+var float val_price = na
+
+if volume_enabled and array.size(vp_volumes) > 0
+    max_volume = array.max(vp_volumes)
+    max_index = array.indexof(vp_volumes, max_volume)
+    poc_price := array.get(vp_prices, max_index)
+    
+    // Calculate Value Area (70% of volume)
+    total_volume = array.sum(vp_volumes)
+    target_volume = total_volume * 0.7
+    
+    var float accumulated_volume = 0
+    accumulated_volume := array.get(vp_volumes, max_index)
+    
+    var int upper_index = max_index
+    var int lower_index = max_index
+    
+    while accumulated_volume < target_volume and (upper_index < array.size(vp_volumes) - 1 or lower_index > 0)
+        float upper_vol = upper_index < array.size(vp_volumes) - 1 ? array.get(vp_volumes, upper_index + 1) : 0
+        float lower_vol = lower_index > 0 ? array.get(vp_volumes, lower_index - 1) : 0
+        
+        if upper_vol > lower_vol and upper_index < array.size(vp_volumes) - 1
+            upper_index += 1
+            accumulated_volume += upper_vol
+        else if lower_index > 0
+            lower_index -= 1
+            accumulated_volume += lower_vol
+        else
+            break
+    
+    vah_price := upper_index < array.size(vp_prices) ? array.get(vp_prices, upper_index) : na
+    val_price := lower_index < array.size(vp_prices) ? array.get(vp_prices, lower_index) : na
+
+// ============================================================================
+// MARKET STRUCTURE
+// ============================================================================
+
+var line[] swing_lines = array.new_line()
+var label[] swing_labels = array.new_label()
+
+if structure_enabled and show_swings
+    // Plot swing highs
+    if not na(swing_high)
+        if array.size(swing_labels) < 50
+            swing_label = label.new(bar_index - swing_length, swing_high, "HH", 
+                 style=label.style_label_down, color=bearish_color, textcolor=color.white, size=size.tiny)
+            array.push(swing_labels, swing_label)
+    
+    // Plot swing lows
+    if not na(swing_low)
+        if array.size(swing_labels) < 50
+            swing_label = label.new(bar_index - swing_length, swing_low, "LL", 
+                 style=label.style_label_up, color=bullish_color, textcolor=color.white, size=size.tiny)
+            array.push(swing_labels, swing_label)
+
+// ============================================================================
+// DYNAMIC SUPPORT/RESISTANCE ZONES
+// ============================================================================
+
+var line[] support_lines = array.new_line()
+var line[] resistance_lines = array.new_line()
+var float[] support_levels = array.new_float()
+var float[] resistance_levels = array.new_float()
+
+// Detect support and resistance levels
+if sr_enabled and bar_index % 10 == 0  // Update every 10 bars for performance
+    array.clear(support_levels)
+    array.clear(resistance_levels)
+    
+    // Find significant highs and lows in lookback period
+    for i = swing_length to math.min(sr_lookback, bar_index)
+        if ta.pivothigh(high, swing_length, swing_length)[i]
+            level = high[i + swing_length]
+            bool is_valid = true
+            
+            // Check if level is near existing resistance
+            for j = 0 to array.size(resistance_levels) - 1
+                if math.abs(level - array.get(resistance_levels, j)) / level * 100 < sr_touch_tolerance
+                    is_valid := false
+                    break
+            
+            if is_valid and array.size(resistance_levels) < max_sr_zones
+                array.push(resistance_levels, level)
+        
+        if ta.pivotlow(low, swing_length, swing_length)[i]
+            level = low[i + swing_length]
+            bool is_valid = true
+            
+            // Check if level is near existing support
+            for j = 0 to array.size(support_levels) - 1
+                if math.abs(level - array.get(support_levels, j)) / level * 100 < sr_touch_tolerance
+                    is_valid := false
+                    break
+            
+            if is_valid and array.size(support_levels) < max_sr_zones
+                array.push(support_levels, level)
+
+// Draw support and resistance lines
+if sr_enabled and bar_index % 10 == 0
+    // Clear old lines
+    for i = 0 to array.size(support_lines) - 1
+        line.delete(array.get(support_lines, i))
+    for i = 0 to array.size(resistance_lines) - 1
+        line.delete(array.get(resistance_lines, i))
+    
+    array.clear(support_lines)
+    array.clear(resistance_lines)
+    
+    // Draw new support lines
+    for i = 0 to array.size(support_levels) - 1
+        level = array.get(support_levels, i)
+        support_line = line.new(bar_index - sr_lookback, level, bar_index, level, 
+             color=color.new(bullish_color, 50), width=2, style=line.style_solid)
+        array.push(support_lines, support_line)
+    
+    // Draw new resistance lines
+    for i = 0 to array.size(resistance_levels) - 1
+        level = array.get(resistance_levels, i)
+        resistance_line = line.new(bar_index - sr_lookback, level, bar_index, level, 
+             color=color.new(bearish_color, 50), width=2, style=line.style_solid)
+        array.push(resistance_lines, resistance_line)
+
+// ============================================================================
+// MULTI-SYMBOL DASHBOARD
+// ============================================================================
+
+// Function to get symbol trend
+f_get_symbol_trend(symbol_id) =>
+    sym_close = request.security(symbol_id, timeframe.period, close, lookahead=barmerge.lookahead_off)
+    sym_rsi = request.security(symbol_id, timeframe.period, rsi_value, lookahead=barmerge.lookahead_off)
+    sym_macd = request.security(symbol_id, timeframe.period, macd_hist, lookahead=barmerge.lookahead_off)
+    
+    trend = sym_rsi > 50 and sym_macd > 0 ? "Bullish" : sym_rsi < 50 and sym_macd < 0 ? "Bearish" : "Neutral"
+    trend_color = sym_rsi > 50 and sym_macd > 0 ? bullish_color : sym_rsi < 50 and sym_macd < 0 ? bearish_color : neutral_color
+    
+    [trend, trend_color, sym_rsi]
+
+// Get trends for each symbol
+[trend1, color1, rsi1] = f_get_symbol_trend(symbol1)
+[trend2, color2, rsi2] = f_get_symbol_trend(symbol2)
+[trend3, color3, rsi3] = f_get_symbol_trend(symbol3)
+
+// Create dashboard
+var table dashboard_table = na
+if dashboard_enabled and barstate.islast
+    table.delete(dashboard_table)
+    
+    // Position mapping
+    table_position = dashboard_position == "top_left" ? position.top_left : 
+                     dashboard_position == "top_right" ? position.top_right :
+                     dashboard_position == "bottom_left" ? position.bottom_left : position.bottom_right
+    
+    dashboard_table := table.new(table_position, 4, 5, bgcolor=color.new(color.black, 10), 
+                         border_width=2, border_color=color.new(color.gray, 50))
+    
+    // Header
+    table.cell(dashboard_table, 0, 0, "Multi-Symbol Dashboard", bgcolor=color.new(color.blue, 70), 
+               text_color=color.white, text_size=size.normal)
+    table.merge_cells(dashboard_table, 0, 0, 3, 0)
+    
+    table.cell(dashboard_table, 0, 1, "Symbol", bgcolor=color.new(color.gray, 80), text_color=color.white)
+    table.cell(dashboard_table, 1, 1, "Trend", bgcolor=color.new(color.gray, 80), text_color=color.white)
+    table.cell(dashboard_table, 2, 1, "RSI", bgcolor=color.new(color.gray, 80), text_color=color.white)
+    table.cell(dashboard_table, 3, 1, "Signal", bgcolor=color.new(color.gray, 80), text_color=color.white)
+    
+    // Symbol 1
+    table.cell(dashboard_table, 0, 2, symbol1, text_color=color.white)
+    table.cell(dashboard_table, 1, 2, trend1, bgcolor=color.new(color1, 70), text_color=color.white)
+    table.cell(dashboard_table, 2, 2, str.tostring(math.round(rsi1, 2)), text_color=color.white)
+    signal1 = rsi1 > rsi_ob ? "SELL" : rsi1 < rsi_os ? "BUY" : "-"
+    table.cell(dashboard_table, 3, 2, signal1, text_color=color.white)
+    
+    // Symbol 2
+    table.cell(dashboard_table, 0, 3, symbol2, text_color=color.white)
+    table.cell(dashboard_table, 1, 3, trend2, bgcolor=color.new(color2, 70), text_color=color.white)
+    table.cell(dashboard_table, 2, 3, str.tostring(math.round(rsi2, 2)), text_color=color.white)
+    signal2 = rsi2 > rsi_ob ? "SELL" : rsi2 < rsi_os ? "BUY" : "-"
+    table.cell(dashboard_table, 3, 3, signal2, text_color=color.white)
+    
+    // Symbol 3
+    table.cell(dashboard_table, 0, 4, symbol3, text_color=color.white)
+    table.cell(dashboard_table, 1, 4, trend3, bgcolor=color.new(color3, 70), text_color=color.white)
+    table.cell(dashboard_table, 2, 4, str.tostring(math.round(rsi3, 2)), text_color=color.white)
+    signal3 = rsi3 > rsi_ob ? "SELL" : rsi3 < rsi_os ? "BUY" : "-"
+    table.cell(dashboard_table, 3, 4, signal3, text_color=color.white)
+
+// ============================================================================
+// RISK MANAGEMENT
+// ============================================================================
+
+// Calculate position size based on risk
+f_calculate_position_size(entry_price, stop_loss_price, account_size, risk_pct) =>
+    risk_amount = account_size * (risk_pct / 100)
+    price_difference = math.abs(entry_price - stop_loss_price)
+    position_size = risk_amount / price_difference
+    position_size
+
+// Calculate stop loss and take profit levels
+var float entry_price = na
+var float stop_loss = na
+var float take_profit = na
+
+if mtf_bullish_confluence and strategy.position_size == 0
+    entry_price := close
+    // Use recent swing low as stop loss
+    stop_loss := not na(last_swing_low) ? last_swing_low : close * 0.98
+    take_profit := entry_price + (entry_price - stop_loss) * reward_risk_ratio
+
+if mtf_bearish_confluence and strategy.position_size == 0
+    entry_price := close
+    // Use recent swing high as stop loss
+    stop_loss := not na(last_swing_high) ? last_swing_high : close * 1.02
+    take_profit := entry_price - (stop_loss - entry_price) * reward_risk_ratio
+
+// ============================================================================
+// PLOTTING
+// ============================================================================
+
+// Plot Volume Profile levels
+plot(volume_enabled and show_poc ? poc_price : na, "POC", color=color.new(color.yellow, 0), linewidth=2, style=plot.style_line)
+plot(volume_enabled and show_vah_val ? vah_price : na, "VAH", color=color.new(color.orange, 30), linewidth=1, style=plot.style_line)
+plot(volume_enabled and show_vah_val ? val_price : na, "VAL", color=color.new(color.orange, 30), linewidth=1, style=plot.style_line)
+
+// Plot BOS/CHoCH signals
+plotshape(bos_bullish, "BOS Bullish", shape.triangleup, location.belowbar, bullish_color, size=size.small)
+plotshape(bos_bearish, "BOS Bearish", shape.triangledown, location.abovebar, bearish_color, size=size.small)
+plotshape(choch_bullish, "CHoCH Bullish", shape.circle, location.belowbar, color.new(bullish_color, 30), size=size.tiny)
+plotshape(choch_bearish, "CHoCH Bearish", shape.circle, location.abovebar, color.new(bearish_color, 30), size=size.tiny)
+
+// Plot MTF Confluence signals
+plotshape(mtf_bullish_confluence, "MTF Bullish", shape.labelup, location.belowbar, color.new(color.green, 0), 
+         text="BUY", textcolor=color.white, size=size.normal)
+plotshape(mtf_bearish_confluence, "MTF Bearish", shape.labeldown, location.abovebar, color.new(color.red, 0), 
+         text="SELL", textcolor=color.white, size=size.normal)
+
+// Background color for confluence
+bgcolor(mtf_bullish_confluence ? color.new(bullish_color, 95) : mtf_bearish_confluence ? color.new(bearish_color, 95) : na)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+if enable_alerts and alert_confluence and mtf_bullish_confluence
+    alert("MTF Bullish Confluence Signal - " + syminfo.ticker + " @ " + str.tostring(close), alert.freq_once_per_bar_close)
+
+if enable_alerts and alert_confluence and mtf_bearish_confluence
+    alert("MTF Bearish Confluence Signal - " + syminfo.ticker + " @ " + str.tostring(close), alert.freq_once_per_bar_close)
+
+if enable_alerts and alert_orderflow and bos_bullish
+    alert("Break of Structure (Bullish) - " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+if enable_alerts and alert_orderflow and bos_bearish
+    alert("Break of Structure (Bearish) - " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+if enable_alerts and alert_orderflow and fvg_bull
+    alert("Fair Value Gap (Bullish) detected - " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+if enable_alerts and alert_orderflow and fvg_bear
+    alert("Fair Value Gap (Bearish) detected - " + syminfo.ticker, alert.freq_once_per_bar_close)
+
+// ============================================================================
+// BACKTESTING METRICS TABLE
+// ============================================================================
+
+var table metrics_table = na
+if barstate.islast
+    table.delete(metrics_table)
+    
+    metrics_table := table.new(position.bottom_left, 2, 8, bgcolor=color.new(color.black, 10), 
+                     border_width=2, border_color=color.new(color.gray, 50))
+    
+    // Header
+    table.cell(metrics_table, 0, 0, "Performance Metrics", bgcolor=color.new(color.blue, 70), 
+               text_color=color.white, text_size=size.normal)
+    table.merge_cells(metrics_table, 0, 0, 1, 0)
+    
+    // Metrics
+    table.cell(metrics_table, 0, 1, "Risk %:", text_color=color.white)
+    table.cell(metrics_table, 1, 1, str.tostring(risk_percent) + "%", text_color=color.white)
+    
+    table.cell(metrics_table, 0, 2, "R:R Ratio:", text_color=color.white)
+    table.cell(metrics_table, 1, 2, str.tostring(reward_risk_ratio) + ":1", text_color=color.white)
+    
+    table.cell(metrics_table, 0, 3, "Entry:", text_color=color.white)
+    table.cell(metrics_table, 1, 3, not na(entry_price) ? str.tostring(entry_price) : "-", text_color=color.white)
+    
+    table.cell(metrics_table, 0, 4, "Stop Loss:", text_color=color.white)
+    table.cell(metrics_table, 1, 4, not na(stop_loss) ? str.tostring(stop_loss) : "-", text_color=color.white)
+    
+    table.cell(metrics_table, 0, 5, "Take Profit:", text_color=color.white)
+    table.cell(metrics_table, 1, 5, not na(take_profit) ? str.tostring(take_profit) : "-", text_color=color.white)
+    
+    table.cell(metrics_table, 0, 6, "Risk Amount:", text_color=color.white)
+    risk_amt = not na(entry_price) and not na(stop_loss) ? math.abs(entry_price - stop_loss) : 0
+    table.cell(metrics_table, 1, 6, str.tostring(math.round(risk_amt, 2)), text_color=color.white)
+    
+    table.cell(metrics_table, 0, 7, "Reward Amount:", text_color=color.white)
+    reward_amt = not na(entry_price) and not na(take_profit) ? math.abs(take_profit - entry_price) : 0
+    table.cell(metrics_table, 1, 7, str.tostring(math.round(reward_amt, 2)), text_color=color.white)

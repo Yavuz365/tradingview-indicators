@@ -1,0 +1,234 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Yavuz365
+
+//@version=5
+indicator("MTF Confluence Scanner", overlay=true, max_bars_back=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+tf1 = input.timeframe("15", "Timeframe 1")
+tf2 = input.timeframe("60", "Timeframe 2")
+tf3 = input.timeframe("240", "Timeframe 3")
+tf4 = input.timeframe("D", "Timeframe 4")
+
+rsi_length = input.int(14, "RSI Length", minval=1)
+rsi_ob = input.int(70, "RSI Overbought", minval=50, maxval=100)
+rsi_os = input.int(30, "RSI Oversold", minval=0, maxval=50)
+
+macd_fast = input.int(12, "MACD Fast Length", minval=1)
+macd_slow = input.int(26, "MACD Slow Length", minval=1)
+macd_signal = input.int(9, "MACD Signal Length", minval=1)
+
+stoch_k = input.int(14, "Stochastic %K", minval=1)
+stoch_d = input.int(3, "Stochastic %D", minval=1)
+stoch_smooth = input.int(3, "Stochastic Smooth", minval=1)
+stoch_ob = input.int(80, "Stoch Overbought", minval=50, maxval=100)
+stoch_os = input.int(20, "Stoch Oversold", minval=0, maxval=50)
+
+show_divergence = input.bool(true, "Show Divergence Signals")
+show_table = input.bool(true, "Show MTF Table")
+confluence_threshold = input.int(3, "Confluence Threshold (# of timeframes)", minval=2, maxval=4)
+
+// ============================================================================
+// INDICATOR CALCULATIONS
+// ============================================================================
+
+// RSI
+rsi = ta.rsi(close, rsi_length)
+
+// MACD
+[macd_line, signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+
+// Stochastic
+stoch_k_line = ta.stoch(close, high, low, stoch_k)
+stoch_d_line = ta.sma(stoch_k_line, stoch_d)
+
+// ============================================================================
+// MULTI-TIMEFRAME ANALYSIS
+// ============================================================================
+
+// Get MTF RSI values
+rsi_tf1 = request.security(syminfo.tickerid, tf1, rsi, lookahead=barmerge.lookahead_off)
+rsi_tf2 = request.security(syminfo.tickerid, tf2, rsi, lookahead=barmerge.lookahead_off)
+rsi_tf3 = request.security(syminfo.tickerid, tf3, rsi, lookahead=barmerge.lookahead_off)
+rsi_tf4 = request.security(syminfo.tickerid, tf4, rsi, lookahead=barmerge.lookahead_off)
+
+// Get MTF MACD values
+macd_tf1 = request.security(syminfo.tickerid, tf1, macd_hist, lookahead=barmerge.lookahead_off)
+macd_tf2 = request.security(syminfo.tickerid, tf2, macd_hist, lookahead=barmerge.lookahead_off)
+macd_tf3 = request.security(syminfo.tickerid, tf3, macd_hist, lookahead=barmerge.lookahead_off)
+macd_tf4 = request.security(syminfo.tickerid, tf4, macd_hist, lookahead=barmerge.lookahead_off)
+
+// Get MTF Stochastic values
+stoch_tf1 = request.security(syminfo.tickerid, tf1, stoch_k_line, lookahead=barmerge.lookahead_off)
+stoch_tf2 = request.security(syminfo.tickerid, tf2, stoch_k_line, lookahead=barmerge.lookahead_off)
+stoch_tf3 = request.security(syminfo.tickerid, tf3, stoch_k_line, lookahead=barmerge.lookahead_off)
+stoch_tf4 = request.security(syminfo.tickerid, tf4, stoch_k_line, lookahead=barmerge.lookahead_off)
+
+// ============================================================================
+// DIVERGENCE DETECTION
+// ============================================================================
+
+f_detect_rsi_divergence(lookback) =>
+    // Bullish divergence: Price lower low, RSI higher low
+    pivot_low = ta.pivotlow(low, lookback, lookback)
+    pivot_rsi_low = ta.pivotlow(rsi, lookback, lookback)
+    
+    bool bull_div = false
+    bool bear_div = false
+    
+    if not na(pivot_low) and not na(pivot_rsi_low)
+        if low[lookback] < low[lookback * 2] and rsi[lookback] > rsi[lookback * 2]
+            bull_div := true
+    
+    // Bearish divergence: Price higher high, RSI lower high
+    pivot_high = ta.pivothigh(high, lookback, lookback)
+    pivot_rsi_high = ta.pivothigh(rsi, lookback, lookback)
+    
+    if not na(pivot_high) and not na(pivot_rsi_high)
+        if high[lookback] > high[lookback * 2] and rsi[lookback] < rsi[lookback * 2]
+            bear_div := true
+    
+    [bull_div, bear_div]
+
+[rsi_bull_div, rsi_bear_div] = f_detect_rsi_divergence(5)
+
+// ============================================================================
+// CONFLUENCE SCORING
+// ============================================================================
+
+// Bullish signals
+bullish_count = 0
+bullish_count := bullish_count + (rsi_tf1 < rsi_os ? 1 : 0)
+bullish_count := bullish_count + (rsi_tf2 < rsi_os ? 1 : 0)
+bullish_count := bullish_count + (rsi_tf3 < rsi_os ? 1 : 0)
+bullish_count := bullish_count + (rsi_tf4 < rsi_os ? 1 : 0)
+bullish_count := bullish_count + (macd_tf1 > 0 and macd_tf1 > macd_tf1[1] ? 1 : 0)
+bullish_count := bullish_count + (macd_tf2 > 0 and macd_tf2 > macd_tf2[1] ? 1 : 0)
+bullish_count := bullish_count + (stoch_tf1 < stoch_os ? 1 : 0)
+bullish_count := bullish_count + (stoch_tf2 < stoch_os ? 1 : 0)
+
+// Bearish signals
+bearish_count = 0
+bearish_count := bearish_count + (rsi_tf1 > rsi_ob ? 1 : 0)
+bearish_count := bearish_count + (rsi_tf2 > rsi_ob ? 1 : 0)
+bearish_count := bearish_count + (rsi_tf3 > rsi_ob ? 1 : 0)
+bearish_count := bearish_count + (rsi_tf4 > rsi_ob ? 1 : 0)
+bearish_count := bearish_count + (macd_tf1 < 0 and macd_tf1 < macd_tf1[1] ? 1 : 0)
+bearish_count := bearish_count + (macd_tf2 < 0 and macd_tf2 < macd_tf2[1] ? 1 : 0)
+bearish_count := bearish_count + (stoch_tf1 > stoch_ob ? 1 : 0)
+bearish_count := bearish_count + (stoch_tf2 > stoch_ob ? 1 : 0)
+
+// Strong confluence signals
+strong_bullish = bullish_count >= confluence_threshold
+strong_bearish = bearish_count >= confluence_threshold
+
+// ============================================================================
+// MTF TABLE
+// ============================================================================
+
+var table mtf_table = na
+
+if show_table and barstate.islast
+    table.delete(mtf_table)
+    
+    mtf_table := table.new(position.top_right, 6, 6, bgcolor=color.new(color.black, 10), 
+                 border_width=2, border_color=color.new(color.gray, 50))
+    
+    // Header
+    table.cell(mtf_table, 0, 0, "MTF Confluence Scanner", bgcolor=color.new(color.blue, 70), 
+               text_color=color.white, text_size=size.normal)
+    table.merge_cells(mtf_table, 0, 0, 5, 0)
+    
+    // Column headers
+    table.cell(mtf_table, 0, 1, "Timeframe", bgcolor=color.new(color.gray, 80), text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 1, 1, "RSI", bgcolor=color.new(color.gray, 80), text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 2, 1, "MACD", bgcolor=color.new(color.gray, 80), text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 3, 1, "Stoch", bgcolor=color.new(color.gray, 80), text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 4, 1, "Signal", bgcolor=color.new(color.gray, 80), text_color=color.white, text_size=size.small)
+    table.cell(mtf_table, 5, 1, "Trend", bgcolor=color.new(color.gray, 80), text_color=color.white, text_size=size.small)
+    
+    // TF1 Row
+    table.cell(mtf_table, 0, 2, tf1, text_color=color.white, text_size=size.tiny)
+    rsi_color1 = rsi_tf1 > rsi_ob ? color.red : rsi_tf1 < rsi_os ? color.green : color.gray
+    table.cell(mtf_table, 1, 2, str.tostring(math.round(rsi_tf1, 1)), bgcolor=color.new(rsi_color1, 70), text_color=color.white, text_size=size.tiny)
+    macd_color1 = macd_tf1 > 0 ? color.green : color.red
+    table.cell(mtf_table, 2, 2, macd_tf1 > 0 ? "▲" : "▼", bgcolor=color.new(macd_color1, 70), text_color=color.white, text_size=size.tiny)
+    stoch_color1 = stoch_tf1 > stoch_ob ? color.red : stoch_tf1 < stoch_os ? color.green : color.gray
+    table.cell(mtf_table, 3, 2, str.tostring(math.round(stoch_tf1, 1)), bgcolor=color.new(stoch_color1, 70), text_color=color.white, text_size=size.tiny)
+    signal1 = rsi_tf1 < rsi_os and macd_tf1 > 0 ? "BUY" : rsi_tf1 > rsi_ob and macd_tf1 < 0 ? "SELL" : "-"
+    signal_color1 = signal1 == "BUY" ? color.green : signal1 == "SELL" ? color.red : color.gray
+    table.cell(mtf_table, 4, 2, signal1, bgcolor=color.new(signal_color1, 70), text_color=color.white, text_size=size.tiny)
+    trend1 = macd_tf1 > 0 ? "↑" : "↓"
+    table.cell(mtf_table, 5, 2, trend1, text_color=macd_tf1 > 0 ? color.green : color.red, text_size=size.small)
+    
+    // TF2 Row
+    table.cell(mtf_table, 0, 3, tf2, text_color=color.white, text_size=size.tiny)
+    rsi_color2 = rsi_tf2 > rsi_ob ? color.red : rsi_tf2 < rsi_os ? color.green : color.gray
+    table.cell(mtf_table, 1, 3, str.tostring(math.round(rsi_tf2, 1)), bgcolor=color.new(rsi_color2, 70), text_color=color.white, text_size=size.tiny)
+    macd_color2 = macd_tf2 > 0 ? color.green : color.red
+    table.cell(mtf_table, 2, 3, macd_tf2 > 0 ? "▲" : "▼", bgcolor=color.new(macd_color2, 70), text_color=color.white, text_size=size.tiny)
+    stoch_color2 = stoch_tf2 > stoch_ob ? color.red : stoch_tf2 < stoch_os ? color.green : color.gray
+    table.cell(mtf_table, 3, 3, str.tostring(math.round(stoch_tf2, 1)), bgcolor=color.new(stoch_color2, 70), text_color=color.white, text_size=size.tiny)
+    signal2 = rsi_tf2 < rsi_os and macd_tf2 > 0 ? "BUY" : rsi_tf2 > rsi_ob and macd_tf2 < 0 ? "SELL" : "-"
+    signal_color2 = signal2 == "BUY" ? color.green : signal2 == "SELL" ? color.red : color.gray
+    table.cell(mtf_table, 4, 3, signal2, bgcolor=color.new(signal_color2, 70), text_color=color.white, text_size=size.tiny)
+    trend2 = macd_tf2 > 0 ? "↑" : "↓"
+    table.cell(mtf_table, 5, 3, trend2, text_color=macd_tf2 > 0 ? color.green : color.red, text_size=size.small)
+    
+    // TF3 Row
+    table.cell(mtf_table, 0, 4, tf3, text_color=color.white, text_size=size.tiny)
+    rsi_color3 = rsi_tf3 > rsi_ob ? color.red : rsi_tf3 < rsi_os ? color.green : color.gray
+    table.cell(mtf_table, 1, 4, str.tostring(math.round(rsi_tf3, 1)), bgcolor=color.new(rsi_color3, 70), text_color=color.white, text_size=size.tiny)
+    macd_color3 = macd_tf3 > 0 ? color.green : color.red
+    table.cell(mtf_table, 2, 4, macd_tf3 > 0 ? "▲" : "▼", bgcolor=color.new(macd_color3, 70), text_color=color.white, text_size=size.tiny)
+    stoch_color3 = stoch_tf3 > stoch_ob ? color.red : stoch_tf3 < stoch_os ? color.green : color.gray
+    table.cell(mtf_table, 3, 4, str.tostring(math.round(stoch_tf3, 1)), bgcolor=color.new(stoch_color3, 70), text_color=color.white, text_size=size.tiny)
+    signal3 = rsi_tf3 < rsi_os and macd_tf3 > 0 ? "BUY" : rsi_tf3 > rsi_ob and macd_tf3 < 0 ? "SELL" : "-"
+    signal_color3 = signal3 == "BUY" ? color.green : signal3 == "SELL" ? color.red : color.gray
+    table.cell(mtf_table, 4, 4, signal3, bgcolor=color.new(signal_color3, 70), text_color=color.white, text_size=size.tiny)
+    trend3 = macd_tf3 > 0 ? "↑" : "↓"
+    table.cell(mtf_table, 5, 4, trend3, text_color=macd_tf3 > 0 ? color.green : color.red, text_size=size.small)
+    
+    // TF4 Row
+    table.cell(mtf_table, 0, 5, tf4, text_color=color.white, text_size=size.tiny)
+    rsi_color4 = rsi_tf4 > rsi_ob ? color.red : rsi_tf4 < rsi_os ? color.green : color.gray
+    table.cell(mtf_table, 1, 5, str.tostring(math.round(rsi_tf4, 1)), bgcolor=color.new(rsi_color4, 70), text_color=color.white, text_size=size.tiny)
+    macd_color4 = macd_tf4 > 0 ? color.green : color.red
+    table.cell(mtf_table, 2, 5, macd_tf4 > 0 ? "▲" : "▼", bgcolor=color.new(macd_color4, 70), text_color=color.white, text_size=size.tiny)
+    stoch_color4 = stoch_tf4 > stoch_ob ? color.red : stoch_tf4 < stoch_os ? color.green : color.gray
+    table.cell(mtf_table, 3, 5, str.tostring(math.round(stoch_tf4, 1)), bgcolor=color.new(stoch_color4, 70), text_color=color.white, text_size=size.tiny)
+    signal4 = rsi_tf4 < rsi_os and macd_tf4 > 0 ? "BUY" : rsi_tf4 > rsi_ob and macd_tf4 < 0 ? "SELL" : "-"
+    signal_color4 = signal4 == "BUY" ? color.green : signal4 == "SELL" ? color.red : color.gray
+    table.cell(mtf_table, 4, 5, signal4, bgcolor=color.new(signal_color4, 70), text_color=color.white, text_size=size.tiny)
+    trend4 = macd_tf4 > 0 ? "↑" : "↓"
+    table.cell(mtf_table, 5, 5, trend4, text_color=macd_tf4 > 0 ? color.green : color.red, text_size=size.small)
+
+// ============================================================================
+// PLOTTING
+// ============================================================================
+
+// Plot confluence signals
+plotshape(strong_bullish, "Strong Bullish Confluence", shape.labelup, location.belowbar, 
+         color.new(color.green, 0), text="CONFLUENCE BUY", textcolor=color.white, size=size.large)
+plotshape(strong_bearish, "Strong Bearish Confluence", shape.labeldown, location.abovebar, 
+         color.new(color.red, 0), text="CONFLUENCE SELL", textcolor=color.white, size=size.large)
+
+// Plot divergence signals
+plotshape(show_divergence and rsi_bull_div, "RSI Bullish Divergence", shape.triangleup, 
+         location.belowbar, color.new(color.lime, 30), size=size.small)
+plotshape(show_divergence and rsi_bear_div, "RSI Bearish Divergence", shape.triangledown, 
+         location.abovebar, color.new(color.orange, 30), size=size.small)
+
+// Background highlighting
+bgcolor(strong_bullish ? color.new(color.green, 95) : strong_bearish ? color.new(color.red, 95) : na, title="Confluence Background")
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(strong_bullish, "Strong Bullish Confluence", "Strong Bullish Confluence on {{ticker}} @ {{close}}")
+alertcondition(strong_bearish, "Strong Bearish Confluence", "Strong Bearish Confluence on {{ticker}} @ {{close}}")
+alertcondition(rsi_bull_div, "RSI Bullish Divergence", "RSI Bullish Divergence on {{ticker}}")
+alertcondition(rsi_bear_div, "RSI Bearish Divergence", "RSI Bearish Divergence on {{ticker}}")

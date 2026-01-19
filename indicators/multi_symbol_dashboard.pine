@@ -1,0 +1,318 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Yavuz365
+
+//@version=5
+indicator("Multi-Symbol Dashboard", overlay=true, max_bars_back=500)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Symbol Selection
+symbol1 = input.symbol("BINANCE:BTCUSDT", "Symbol 1", group="Symbols")
+symbol2 = input.symbol("BINANCE:ETHUSDT", "Symbol 2", group="Symbols")
+symbol3 = input.symbol("BINANCE:BNBUSDT", "Symbol 3", group="Symbols")
+symbol4 = input.symbol("BINANCE:SOLUSDT", "Symbol 4", group="Symbols")
+symbol5 = input.symbol("BINANCE:ADAUSDT", "Symbol 5", group="Symbols")
+symbol6 = input.symbol("BINANCE:XRPUSDT", "Symbol 6", group="Symbols")
+
+// Indicator Settings
+rsi_length = input.int(14, "RSI Length", minval=1, group="Indicators")
+rsi_ob = input.int(70, "RSI Overbought", minval=50, maxval=100, group="Indicators")
+rsi_os = input.int(30, "RSI Oversold", minval=0, maxval=50, group="Indicators")
+
+macd_fast = input.int(12, "MACD Fast", minval=1, group="Indicators")
+macd_slow = input.int(26, "MACD Slow", minval=1, group="Indicators")
+macd_signal = input.int(9, "MACD Signal", minval=1, group="Indicators")
+
+ema_short = input.int(9, "EMA Short", minval=1, group="Indicators")
+ema_long = input.int(21, "EMA Long", minval=1, group="Indicators")
+
+// Display Settings
+dashboard_position = input.string("middle_right", "Dashboard Position", 
+     options=["top_left", "top_center", "top_right", "middle_left", "middle_center", "middle_right", "bottom_left", "bottom_center", "bottom_right"],
+     group="Display")
+show_price_change = input.bool(true, "Show Price Change %", group="Display")
+show_volume = input.bool(true, "Show Volume", group="Display")
+update_frequency = input.int(5, "Update Every N Bars", minval=1, maxval=50, group="Display")
+
+// ============================================================================
+// HELPER FUNCTIONS
+// ============================================================================
+
+// Function to get comprehensive symbol data
+f_get_symbol_data(symbol_id) =>
+    // Get price data
+    sym_close = request.security(symbol_id, timeframe.period, close, lookahead=barmerge.lookahead_off)
+    sym_open = request.security(symbol_id, timeframe.period, open, lookahead=barmerge.lookahead_off)
+    sym_high = request.security(symbol_id, timeframe.period, high, lookahead=barmerge.lookahead_off)
+    sym_low = request.security(symbol_id, timeframe.period, low, lookahead=barmerge.lookahead_off)
+    sym_volume = request.security(symbol_id, timeframe.period, volume, lookahead=barmerge.lookahead_off)
+    
+    // Calculate indicators
+    sym_rsi = request.security(symbol_id, timeframe.period, ta.rsi(close, rsi_length), lookahead=barmerge.lookahead_off)
+    
+    [macd_line, signal_line, macd_hist] = ta.macd(close, macd_fast, macd_slow, macd_signal)
+    sym_macd = request.security(symbol_id, timeframe.period, macd_hist, lookahead=barmerge.lookahead_off)
+    
+    sym_ema_short = request.security(symbol_id, timeframe.period, ta.ema(close, ema_short), lookahead=barmerge.lookahead_off)
+    sym_ema_long = request.security(symbol_id, timeframe.period, ta.ema(close, ema_long), lookahead=barmerge.lookahead_off)
+    
+    // Calculate price change
+    sym_prev_close = request.security(symbol_id, timeframe.period, close[1], lookahead=barmerge.lookahead_off)
+    price_change_pct = ((sym_close - sym_prev_close) / sym_prev_close) * 100
+    
+    // Determine trend
+    ema_trend = sym_ema_short > sym_ema_long ? "Bullish" : "Bearish"
+    
+    // Determine signal
+    signal = "HOLD"
+    signal_strength = 0
+    
+    // Bullish conditions
+    if sym_rsi < rsi_os
+        signal_strength += 1
+    if sym_macd > 0 and sym_macd > sym_macd[1]
+        signal_strength += 1
+    if sym_ema_short > sym_ema_long
+        signal_strength += 1
+    
+    // Bearish conditions
+    bearish_strength = 0
+    if sym_rsi > rsi_ob
+        bearish_strength += 1
+    if sym_macd < 0 and sym_macd < sym_macd[1]
+        bearish_strength += 1
+    if sym_ema_short < sym_ema_long
+        bearish_strength += 1
+    
+    // Determine signal based on strength
+    if signal_strength >= 2
+        signal := "BUY"
+    else if bearish_strength >= 2
+        signal := "SELL"
+    
+    // Return all data
+    [sym_close, price_change_pct, sym_rsi, sym_macd, ema_trend, signal, sym_volume]
+
+// ============================================================================
+// GET DATA FOR ALL SYMBOLS
+// ============================================================================
+
+[close1, change1, rsi1, macd1, trend1, signal1, vol1] = f_get_symbol_data(symbol1)
+[close2, change2, rsi2, macd2, trend2, signal2, vol2] = f_get_symbol_data(symbol2)
+[close3, change3, rsi3, macd3, trend3, signal3, vol3] = f_get_symbol_data(symbol3)
+[close4, change4, rsi4, macd4, trend4, signal4, vol4] = f_get_symbol_data(symbol4)
+[close5, change5, rsi5, macd5, trend5, signal5, vol5] = f_get_symbol_data(symbol5)
+[close6, change6, rsi6, macd6, trend6, signal6, vol6] = f_get_symbol_data(symbol6)
+
+// ============================================================================
+// CREATE DASHBOARD TABLE
+// ============================================================================
+
+var table dashboard_table = na
+
+// Update dashboard
+if barstate.islast or bar_index % update_frequency == 0
+    table.delete(dashboard_table)
+    
+    // Map position string to position constant
+    pos = dashboard_position == "top_left" ? position.top_left :
+          dashboard_position == "top_center" ? position.top_center :
+          dashboard_position == "top_right" ? position.top_right :
+          dashboard_position == "middle_left" ? position.middle_left :
+          dashboard_position == "middle_center" ? position.middle_center :
+          dashboard_position == "middle_right" ? position.middle_right :
+          dashboard_position == "bottom_left" ? position.bottom_left :
+          dashboard_position == "bottom_center" ? position.bottom_center :
+          position.bottom_right
+    
+    // Determine number of columns
+    num_cols = 6
+    if show_price_change
+        num_cols += 1
+    if show_volume
+        num_cols += 1
+    
+    dashboard_table := table.new(pos, num_cols, 8, bgcolor=color.new(color.black, 5), 
+                         border_width=2, border_color=color.new(color.blue, 50))
+    
+    // Header row
+    table.cell(dashboard_table, 0, 0, "Multi-Symbol Dashboard", 
+               bgcolor=color.new(color.blue, 60), text_color=color.white, 
+               text_size=size.normal)
+    table.merge_cells(dashboard_table, 0, 0, num_cols - 1, 0)
+    
+    // Column headers
+    col = 0
+    table.cell(dashboard_table, col, 1, "Symbol", bgcolor=color.new(color.gray, 70), 
+               text_color=color.white, text_size=size.small)
+    col += 1
+    
+    table.cell(dashboard_table, col, 1, "Price", bgcolor=color.new(color.gray, 70), 
+               text_color=color.white, text_size=size.small)
+    col += 1
+    
+    if show_price_change
+        table.cell(dashboard_table, col, 1, "Change %", bgcolor=color.new(color.gray, 70), 
+                   text_color=color.white, text_size=size.small)
+        col += 1
+    
+    table.cell(dashboard_table, col, 1, "RSI", bgcolor=color.new(color.gray, 70), 
+               text_color=color.white, text_size=size.small)
+    col += 1
+    
+    table.cell(dashboard_table, col, 1, "MACD", bgcolor=color.new(color.gray, 70), 
+               text_color=color.white, text_size=size.small)
+    col += 1
+    
+    table.cell(dashboard_table, col, 1, "Trend", bgcolor=color.new(color.gray, 70), 
+               text_color=color.white, text_size=size.small)
+    col += 1
+    
+    if show_volume
+        table.cell(dashboard_table, col, 1, "Volume", bgcolor=color.new(color.gray, 70), 
+                   text_color=color.white, text_size=size.small)
+        col += 1
+    
+    table.cell(dashboard_table, col, 1, "Signal", bgcolor=color.new(color.gray, 70), 
+               text_color=color.white, text_size=size.small)
+    
+    // Function to add symbol row
+    f_add_symbol_row(row, sym_name, price, change, rsi, macd, trend, sig, vol) =>
+        col_idx = 0
+        
+        // Symbol name
+        table.cell(dashboard_table, col_idx, row, sym_name, text_color=color.white, text_size=size.tiny)
+        col_idx += 1
+        
+        // Price
+        table.cell(dashboard_table, col_idx, row, str.tostring(price, format.mintick), 
+                   text_color=color.white, text_size=size.tiny)
+        col_idx += 1
+        
+        // Change %
+        if show_price_change
+            change_color = change > 0 ? color.green : change < 0 ? color.red : color.gray
+            change_text = (change > 0 ? "+" : "") + str.tostring(math.round(change, 2)) + "%"
+            table.cell(dashboard_table, col_idx, row, change_text, 
+                       bgcolor=color.new(change_color, 80), text_color=color.white, text_size=size.tiny)
+            col_idx += 1
+        
+        // RSI
+        rsi_color = rsi > rsi_ob ? color.red : rsi < rsi_os ? color.green : color.gray
+        table.cell(dashboard_table, col_idx, row, str.tostring(math.round(rsi, 1)), 
+                   bgcolor=color.new(rsi_color, 70), text_color=color.white, text_size=size.tiny)
+        col_idx += 1
+        
+        // MACD
+        macd_color = macd > 0 ? color.green : color.red
+        macd_text = macd > 0 ? "▲" : "▼"
+        table.cell(dashboard_table, col_idx, row, macd_text, 
+                   bgcolor=color.new(macd_color, 70), text_color=color.white, text_size=size.small)
+        col_idx += 1
+        
+        // Trend
+        trend_color = trend == "Bullish" ? color.green : color.red
+        table.cell(dashboard_table, col_idx, row, trend, 
+                   bgcolor=color.new(trend_color, 70), text_color=color.white, text_size=size.tiny)
+        col_idx += 1
+        
+        // Volume
+        if show_volume
+            vol_short = vol > 1000000 ? str.tostring(math.round(vol / 1000000, 1)) + "M" :
+                        vol > 1000 ? str.tostring(math.round(vol / 1000, 1)) + "K" :
+                        str.tostring(math.round(vol, 0))
+            table.cell(dashboard_table, col_idx, row, vol_short, 
+                       text_color=color.white, text_size=size.tiny)
+            col_idx += 1
+        
+        // Signal
+        sig_color = sig == "BUY" ? color.green : sig == "SELL" ? color.red : color.gray
+        table.cell(dashboard_table, col_idx, row, sig, 
+                   bgcolor=color.new(sig_color, 50), text_color=color.white, 
+                   text_size=size.small)
+    
+    // Add rows for each symbol
+    f_add_symbol_row(2, symbol1, close1, change1, rsi1, macd1, trend1, signal1, vol1)
+    f_add_symbol_row(3, symbol2, close2, change2, rsi2, macd2, trend2, signal2, vol2)
+    f_add_symbol_row(4, symbol3, close3, change3, rsi3, macd3, trend3, signal3, vol3)
+    f_add_symbol_row(5, symbol4, close4, change4, rsi4, macd4, trend4, signal4, vol4)
+    f_add_symbol_row(6, symbol5, close5, change5, rsi5, macd5, trend5, signal5, vol5)
+    f_add_symbol_row(7, symbol6, close6, change6, rsi6, macd6, trend6, signal6, vol6)
+
+// ============================================================================
+// SUMMARY STATISTICS
+// ============================================================================
+
+// Count signals
+buy_signals = (signal1 == "BUY" ? 1 : 0) + (signal2 == "BUY" ? 1 : 0) + 
+              (signal3 == "BUY" ? 1 : 0) + (signal4 == "BUY" ? 1 : 0) + 
+              (signal5 == "BUY" ? 1 : 0) + (signal6 == "BUY" ? 1 : 0)
+
+sell_signals = (signal1 == "SELL" ? 1 : 0) + (signal2 == "SELL" ? 1 : 0) + 
+               (signal3 == "SELL" ? 1 : 0) + (signal4 == "SELL" ? 1 : 0) + 
+               (signal5 == "SELL" ? 1 : 0) + (signal6 == "SELL" ? 1 : 0)
+
+bullish_trends = (trend1 == "Bullish" ? 1 : 0) + (trend2 == "Bullish" ? 1 : 0) + 
+                 (trend3 == "Bullish" ? 1 : 0) + (trend4 == "Bullish" ? 1 : 0) + 
+                 (trend5 == "Bullish" ? 1 : 0) + (trend6 == "Bullish" ? 1 : 0)
+
+// Market sentiment
+market_sentiment = bullish_trends >= 4 ? "Very Bullish" :
+                   bullish_trends >= 3 ? "Bullish" :
+                   bullish_trends >= 2 ? "Neutral" :
+                   bullish_trends >= 1 ? "Bearish" : "Very Bearish"
+
+// ============================================================================
+// SUMMARY TABLE
+// ============================================================================
+
+var table summary_table = na
+
+if barstate.islast or bar_index % update_frequency == 0
+    table.delete(summary_table)
+    
+    summary_pos = dashboard_position == "top_left" or dashboard_position == "middle_left" or dashboard_position == "bottom_left" ? 
+                  position.bottom_left : position.bottom_right
+    
+    summary_table := table.new(summary_pos, 2, 4, bgcolor=color.new(color.black, 5), 
+                     border_width=2, border_color=color.new(color.blue, 50))
+    
+    // Header
+    table.cell(summary_table, 0, 0, "Market Summary", bgcolor=color.new(color.blue, 60), 
+               text_color=color.white, text_size=size.normal)
+    table.merge_cells(summary_table, 0, 0, 1, 0)
+    
+    // Buy Signals
+    table.cell(summary_table, 0, 1, "Buy Signals:", text_color=color.white, text_size=size.small)
+    table.cell(summary_table, 1, 1, str.tostring(buy_signals) + " / 6", 
+               bgcolor=color.new(color.green, 70), text_color=color.white, text_size=size.small)
+    
+    // Sell Signals
+    table.cell(summary_table, 0, 2, "Sell Signals:", text_color=color.white, text_size=size.small)
+    table.cell(summary_table, 1, 2, str.tostring(sell_signals) + " / 6", 
+               bgcolor=color.new(color.red, 70), text_color=color.white, text_size=size.small)
+    
+    // Market Sentiment
+    table.cell(summary_table, 0, 3, "Sentiment:", text_color=color.white, text_size=size.small)
+    sentiment_color = market_sentiment == "Very Bullish" or market_sentiment == "Bullish" ? color.green :
+                      market_sentiment == "Very Bearish" or market_sentiment == "Bearish" ? color.red :
+                      color.gray
+    table.cell(summary_table, 1, 3, market_sentiment, 
+               bgcolor=color.new(sentiment_color, 70), text_color=color.white, text_size=size.small)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+// Alert when multiple symbols show same signal
+strong_buy_confluence = buy_signals >= 4
+strong_sell_confluence = sell_signals >= 4
+
+alertcondition(strong_buy_confluence, "Strong Buy Confluence", "4+ symbols showing BUY signal")
+alertcondition(strong_sell_confluence, "Strong Sell Confluence", "4+ symbols showing SELL signal")
+alertcondition(market_sentiment == "Very Bullish" and market_sentiment[1] != "Very Bullish", 
+               "Market Very Bullish", "Market sentiment turned Very Bullish")
+alertcondition(market_sentiment == "Very Bearish" and market_sentiment[1] != "Very Bearish", 
+               "Market Very Bearish", "Market sentiment turned Very Bearish")

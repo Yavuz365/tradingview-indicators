@@ -1,0 +1,171 @@
+// This Pine Script™ code is subject to the terms of the Mozilla Public License 2.0
+// © Yavuz365
+// TimeFrameUtils Library - Multi-Timeframe Utility Functions
+
+//@version=5
+
+// @description Multi-Timeframe utility functions for TradingView indicators.
+// Provides optimized MTF data fetching, timeframe conversion, and signal aggregation.
+library("TimeFrameUtils", overlay=true)
+
+// ============================================================================
+// TIMEFRAME CONVERSION UTILITIES
+// ============================================================================
+
+// @function Converts timeframe string to minutes
+// @param tf Timeframe string (e.g., "15", "60", "D", "W")
+// @returns Number of minutes in the timeframe
+export tfToMinutes(simple string tf) =>
+    switch tf
+        "1" => 1
+        "3" => 3
+        "5" => 5
+        "15" => 15
+        "30" => 30
+        "45" => 45
+        "60" => 60
+        "120" => 120
+        "180" => 180
+        "240" => 240
+        "D" => 1440
+        "W" => 10080
+        "M" => 43200
+        => 60  // Default to 1 hour
+
+// @function Checks if target timeframe is higher than current
+// @param targetTf Target timeframe to compare
+// @returns True if target is higher timeframe
+export isHigherTimeframe(simple string targetTf) =>
+    tfToMinutes(targetTf) > tfToMinutes(timeframe.period)
+
+// ============================================================================
+// MTF DATA FETCHING (Optimized for TradingView limits)
+// ============================================================================
+
+// @function Gets RSI value from specified timeframe
+// @param src Source series
+// @param length RSI period
+// @param tf Target timeframe
+// @returns RSI value from target timeframe
+export mtfRSI(series float src, simple int length, simple string tf) =>
+    request.security(syminfo.tickerid, tf, ta.rsi(src, length), lookahead=barmerge.lookahead_off)
+
+// @function Gets MACD values from specified timeframe
+// @param src Source series
+// @param fast Fast period
+// @param slow Slow period
+// @param signal Signal period
+// @param tf Target timeframe
+// @returns [macdLine, signalLine, histogram]
+export mtfMACD(series float src, simple int fast, simple int slow, simple int signal, simple string tf) =>
+    [macd, sig, hist] = ta.macd(src, fast, slow, signal)
+    mtfMacd = request.security(syminfo.tickerid, tf, macd, lookahead=barmerge.lookahead_off)
+    mtfSig = request.security(syminfo.tickerid, tf, sig, lookahead=barmerge.lookahead_off)
+    mtfHist = request.security(syminfo.tickerid, tf, hist, lookahead=barmerge.lookahead_off)
+    [mtfMacd, mtfSig, mtfHist]
+
+// @function Gets Stochastic values from specified timeframe
+// @param length Stochastic period
+// @param smoothK K smoothing
+// @param smoothD D smoothing
+// @param tf Target timeframe
+// @returns [K, D]
+export mtfStoch(simple int length, simple int smoothK, simple int smoothD, simple string tf) =>
+    k = ta.sma(ta.stoch(close, high, low, length), smoothK)
+    d = ta.sma(k, smoothD)
+    mtfK = request.security(syminfo.tickerid, tf, k, lookahead=barmerge.lookahead_off)
+    mtfD = request.security(syminfo.tickerid, tf, d, lookahead=barmerge.lookahead_off)
+    [mtfK, mtfD]
+
+// @function Gets EMA from specified timeframe
+// @param src Source series
+// @param length EMA period
+// @param tf Target timeframe
+// @returns EMA value
+export mtfEMA(series float src, simple int length, simple string tf) =>
+    request.security(syminfo.tickerid, tf, ta.ema(src, length), lookahead=barmerge.lookahead_off)
+
+// @function Gets SMA from specified timeframe
+// @param src Source series
+// @param length SMA period
+// @param tf Target timeframe
+// @returns SMA value
+export mtfSMA(series float src, simple int length, simple string tf) =>
+    request.security(syminfo.tickerid, tf, ta.sma(src, length), lookahead=barmerge.lookahead_off)
+
+// @function Gets ATR from specified timeframe
+// @param length ATR period
+// @param tf Target timeframe
+// @returns ATR value
+export mtfATR(simple int length, simple string tf) =>
+    request.security(syminfo.tickerid, tf, ta.atr(length), lookahead=barmerge.lookahead_off)
+
+// ============================================================================
+// SIGNAL GENERATION UTILITIES
+// ============================================================================
+
+// @function Standardizes signal to -1 (Sell), 0 (Neutral), 1 (Buy)
+// @param bullish Bullish condition
+// @param bearish Bearish condition
+// @returns Standardized signal (-1, 0, or 1)
+export standardSignal(bool bullish, bool bearish) =>
+    bullish ? 1 : bearish ? -1 : 0
+
+// @function Calculates confluence score from multiple signals
+// @param signals Array of signals (-1, 0, 1)
+// @returns Confluence score (sum of signals)
+export confluenceScore(array<int> signals) =>
+    score = 0
+    for sig in signals
+        score += sig
+    score
+
+// @function Checks if RSI shows divergence
+// @param rsi RSI value
+// @param price Price value
+// @param lookback Lookback period
+// @returns [bullishDiv, bearishDiv]
+export rsiDivergence(series float rsi, series float price, simple int lookback) =>
+    // Price makes lower low but RSI makes higher low = Bullish Divergence
+    priceLowerLow = price < ta.lowest(price, lookback)[1]
+    rsiHigherLow = rsi > ta.lowest(rsi, lookback)[1]
+    bullishDiv = priceLowerLow and rsiHigherLow and rsi < 30
+
+    // Price makes higher high but RSI makes lower high = Bearish Divergence
+    priceHigherHigh = price > ta.highest(price, lookback)[1]
+    rsiLowerHigh = rsi < ta.highest(rsi, lookback)[1]
+    bearishDiv = priceHigherHigh and rsiLowerHigh and rsi > 70
+
+    [bullishDiv, bearishDiv]
+
+// ============================================================================
+// TIMEFRAME ARRAY UTILITIES
+// ============================================================================
+
+// @function Creates standard MTF array
+// @returns Array of common timeframes
+export getStandardTimeframes() =>
+    tfs = array.new_string()
+    array.push(tfs, "15")
+    array.push(tfs, "60")
+    array.push(tfs, "240")
+    array.push(tfs, "D")
+    tfs
+
+// @function Gets timeframe display name
+// @param tf Timeframe string
+// @returns Human-readable timeframe name
+export tfDisplayName(simple string tf) =>
+    switch tf
+        "1" => "1m"
+        "3" => "3m"
+        "5" => "5m"
+        "15" => "15m"
+        "30" => "30m"
+        "60" => "1H"
+        "120" => "2H"
+        "240" => "4H"
+        "D" => "1D"
+        "W" => "1W"
+        "M" => "1M"
+        => tf

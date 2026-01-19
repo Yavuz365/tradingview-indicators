@@ -1,0 +1,374 @@
+// This Pine Script® code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © Yavuz365
+
+//@version=5
+indicator("Market Structure & S/R Zones", overlay=true, max_bars_back=500, max_lines_count=200, max_labels_count=100)
+
+// ============================================================================
+// INPUTS
+// ============================================================================
+
+// Market Structure Settings
+swing_length = input.int(5, "Swing Detection Length", minval=3, maxval=20, group="Market Structure")
+show_swings = input.bool(true, "Show Swing Points", group="Market Structure")
+show_structure_labels = input.bool(true, "Show HH/LL Labels", group="Market Structure")
+show_trendlines = input.bool(true, "Show Trend Lines", group="Market Structure")
+
+// Support/Resistance Settings
+sr_lookback = input.int(100, "S/R Lookback Period", minval=20, maxval=500, group="Support/Resistance")
+sr_touch_tolerance = input.float(0.5, "Touch Tolerance %", minval=0.1, maxval=2.0, group="Support/Resistance")
+max_sr_zones = input.int(5, "Max S/R Zones", minval=1, maxval=20, group="Support/Resistance")
+sr_strength_min = input.int(2, "Min Touches", minval=2, maxval=10, group="Support/Resistance")
+
+// Display Settings
+show_sr_zones = input.bool(true, "Show S/R Zones", group="Display")
+show_sr_breaks = input.bool(true, "Show S/R Breaks", group="Display")
+zone_extend = input.bool(true, "Extend Zones Right", group="Display")
+
+// Colors
+swing_high_color = input.color(color.new(color.red, 0), "Swing High", group="Colors")
+swing_low_color = input.color(color.new(color.green, 0), "Swing Low", group="Colors")
+resistance_color = input.color(color.new(color.red, 80), "Resistance Zone", group="Colors")
+support_color = input.color(color.new(color.green, 80), "Support Zone", group="Colors")
+break_color = input.color(color.new(color.orange, 0), "Break Signal", group="Colors")
+
+// ============================================================================
+// SWING DETECTION
+// ============================================================================
+
+// Detect swing highs and lows
+swing_high = ta.pivothigh(high, swing_length, swing_length)
+swing_low = ta.pivotlow(low, swing_length, swing_length)
+
+// Track swing points
+var float[] swing_highs = array.new_float()
+var int[] swing_high_bars = array.new_int()
+var float[] swing_lows = array.new_float()
+var int[] swing_low_bars = array.new_int()
+
+// Store swing highs
+if not na(swing_high) and show_swings
+    array.push(swing_highs, swing_high)
+    array.push(swing_high_bars, bar_index - swing_length)
+    
+    // Keep only recent swings (last 50)
+    if array.size(swing_highs) > 50
+        array.shift(swing_highs)
+        array.shift(swing_high_bars)
+
+// Store swing lows
+if not na(swing_low) and show_swings
+    array.push(swing_lows, swing_low)
+    array.push(swing_low_bars, bar_index - swing_length)
+    
+    // Keep only recent swings (last 50)
+    if array.size(swing_lows) > 50
+        array.shift(swing_lows)
+        array.shift(swing_low_bars)
+
+// ============================================================================
+// MARKET STRUCTURE CLASSIFICATION
+// ============================================================================
+
+// Determine market structure (Higher Highs, Lower Lows, etc.)
+var float last_swing_high = na
+var float last_swing_low = na
+var bool is_higher_high = false
+var bool is_lower_high = false
+var bool is_higher_low = false
+var bool is_lower_low = false
+var string market_structure = "Neutral"
+
+if not na(swing_high)
+    if not na(last_swing_high)
+        is_higher_high := swing_high > last_swing_high
+        is_lower_high := swing_high < last_swing_high
+    last_swing_high := swing_high
+
+if not na(swing_low)
+    if not na(last_swing_low)
+        is_higher_low := swing_low > last_swing_low
+        is_lower_low := swing_low < last_swing_low
+    last_swing_low := swing_low
+
+// Determine trend
+if is_higher_high and is_higher_low
+    market_structure := "Uptrend"
+else if is_lower_high and is_lower_low
+    market_structure := "Downtrend"
+else if is_lower_high and is_higher_low
+    market_structure := "Ranging"
+
+// ============================================================================
+// DYNAMIC SUPPORT/RESISTANCE ZONES
+// ============================================================================
+
+// Function to check if a level has been touched multiple times
+f_count_touches(level, tolerance_pct, lookback) =>
+    int touches = 0
+    tolerance = level * (tolerance_pct / 100)
+    
+    for i = 0 to math.min(lookback, bar_index - 1)
+        if (high[i] >= level - tolerance and high[i] <= level + tolerance) or
+           (low[i] >= level - tolerance and low[i] <= level + tolerance)
+            touches += 1
+    
+    touches
+
+// Arrays to store S/R levels
+var float[] resistance_levels = array.new_float()
+var int[] resistance_touches = array.new_int()
+var int[] resistance_bars = array.new_int()
+
+var float[] support_levels = array.new_float()
+var int[] support_touches = array.new_int()
+var int[] support_bars = array.new_int()
+
+// Update S/R levels every 20 bars for performance
+if bar_index % 20 == 0 and show_sr_zones
+    array.clear(resistance_levels)
+    array.clear(resistance_touches)
+    array.clear(resistance_bars)
+    array.clear(support_levels)
+    array.clear(support_touches)
+    array.clear(support_bars)
+    
+    // Find resistance levels from swing highs
+    for i = 0 to math.min(array.size(swing_highs) - 1, max_sr_zones * 3)
+        if i < array.size(swing_highs)
+            level = array.get(swing_highs, i)
+            bar_idx = array.get(swing_high_bars, i)
+            
+            // Check if this level is already tracked
+            bool is_duplicate = false
+            for j = 0 to array.size(resistance_levels) - 1
+                existing_level = array.get(resistance_levels, j)
+                if math.abs(level - existing_level) / level * 100 < sr_touch_tolerance
+                    is_duplicate := true
+                    break
+            
+            if not is_duplicate
+                // Count touches
+                touches = f_count_touches(level, sr_touch_tolerance, sr_lookback)
+                
+                if touches >= sr_strength_min and array.size(resistance_levels) < max_sr_zones
+                    array.push(resistance_levels, level)
+                    array.push(resistance_touches, touches)
+                    array.push(resistance_bars, bar_idx)
+    
+    // Find support levels from swing lows
+    for i = 0 to math.min(array.size(swing_lows) - 1, max_sr_zones * 3)
+        if i < array.size(swing_lows)
+            level = array.get(swing_lows, i)
+            bar_idx = array.get(swing_low_bars, i)
+            
+            // Check if this level is already tracked
+            bool is_duplicate = false
+            for j = 0 to array.size(support_levels) - 1
+                existing_level = array.get(support_levels, j)
+                if math.abs(level - existing_level) / level * 100 < sr_touch_tolerance
+                    is_duplicate := true
+                    break
+            
+            if not is_duplicate
+                // Count touches
+                touches = f_count_touches(level, sr_touch_tolerance, sr_lookback)
+                
+                if touches >= sr_strength_min and array.size(support_levels) < max_sr_zones
+                    array.push(support_levels, level)
+                    array.push(support_touches, touches)
+                    array.push(support_bars, bar_idx)
+
+// ============================================================================
+// DRAW S/R ZONES
+// ============================================================================
+
+var box[] resistance_boxes = array.new_box()
+var box[] support_boxes = array.new_box()
+var label[] sr_labels = array.new_label()
+
+if show_sr_zones and bar_index % 20 == 0
+    // Clear old boxes
+    for i = 0 to array.size(resistance_boxes) - 1
+        box.delete(array.get(resistance_boxes, i))
+    for i = 0 to array.size(support_boxes) - 1
+        box.delete(array.get(support_boxes, i))
+    for i = 0 to array.size(sr_labels) - 1
+        label.delete(array.get(sr_labels, i))
+    
+    array.clear(resistance_boxes)
+    array.clear(support_boxes)
+    array.clear(sr_labels)
+    
+    // Draw resistance zones
+    for i = 0 to array.size(resistance_levels) - 1
+        level = array.get(resistance_levels, i)
+        touches = array.get(resistance_touches, i)
+        start_bar = array.get(resistance_bars, i)
+        
+        zone_height = level * (sr_touch_tolerance / 100)
+        
+        res_box = box.new(
+             left=start_bar,
+             top=level + zone_height,
+             right=zone_extend ? bar_index + 50 : bar_index,
+             bottom=level - zone_height,
+             border_color=color.new(swing_high_color, 60),
+             bgcolor=resistance_color,
+             border_width=1,
+             extend=zone_extend ? extend.right : extend.none
+         )
+        array.push(resistance_boxes, res_box)
+        
+        // Add label with touches count
+        res_label = label.new(
+             x=bar_index,
+             y=level,
+             text="R (" + str.tostring(touches) + ")",
+             style=label.style_label_left,
+             color=color.new(swing_high_color, 30),
+             textcolor=color.white,
+             size=size.tiny
+         )
+        array.push(sr_labels, res_label)
+    
+    // Draw support zones
+    for i = 0 to array.size(support_levels) - 1
+        level = array.get(support_levels, i)
+        touches = array.get(support_touches, i)
+        start_bar = array.get(support_bars, i)
+        
+        zone_height = level * (sr_touch_tolerance / 100)
+        
+        sup_box = box.new(
+             left=start_bar,
+             top=level + zone_height,
+             right=zone_extend ? bar_index + 50 : bar_index,
+             bottom=level - zone_height,
+             border_color=color.new(swing_low_color, 60),
+             bgcolor=support_color,
+             border_width=1,
+             extend=zone_extend ? extend.right : extend.none
+         )
+        array.push(support_boxes, sup_box)
+        
+        // Add label with touches count
+        sup_label = label.new(
+             x=bar_index,
+             y=level,
+             text="S (" + str.tostring(touches) + ")",
+             style=label.style_label_left,
+             color=color.new(swing_low_color, 30),
+             textcolor=color.white,
+             size=size.tiny
+         )
+        array.push(sr_labels, sup_label)
+
+// ============================================================================
+// DETECT S/R BREAKS
+// ============================================================================
+
+// Check for resistance breaks (bullish)
+var bool resistance_break = false
+for i = 0 to array.size(resistance_levels) - 1
+    level = array.get(resistance_levels, i)
+    if close > level and close[1] <= level
+        resistance_break := true
+        break
+
+// Check for support breaks (bearish)
+var bool support_break = false
+for i = 0 to array.size(support_levels) - 1
+    level = array.get(support_levels, i)
+    if close < level and close[1] >= level
+        support_break := true
+        break
+
+// ============================================================================
+// MARKET STRUCTURE TABLE
+// ============================================================================
+
+var table structure_table = na
+
+if barstate.islast
+    table.delete(structure_table)
+    
+    structure_table := table.new(position.top_left, 2, 5, bgcolor=color.new(color.black, 10), 
+                       border_width=2, border_color=color.new(color.gray, 50))
+    
+    // Header
+    table.cell(structure_table, 0, 0, "Market Structure", bgcolor=color.new(color.blue, 70), 
+               text_color=color.white, text_size=size.normal)
+    table.merge_cells(structure_table, 0, 0, 1, 0)
+    
+    // Trend
+    table.cell(structure_table, 0, 1, "Trend:", text_color=color.white)
+    trend_color = market_structure == "Uptrend" ? color.green : 
+                  market_structure == "Downtrend" ? color.red : color.gray
+    table.cell(structure_table, 1, 1, market_structure, bgcolor=color.new(trend_color, 70), text_color=color.white)
+    
+    // Last Swing High
+    table.cell(structure_table, 0, 2, "Last Swing High:", text_color=color.white)
+    table.cell(structure_table, 1, 2, not na(last_swing_high) ? str.tostring(last_swing_high, format.mintick) : "-", text_color=color.white)
+    
+    // Last Swing Low
+    table.cell(structure_table, 0, 3, "Last Swing Low:", text_color=color.white)
+    table.cell(structure_table, 1, 3, not na(last_swing_low) ? str.tostring(last_swing_low, format.mintick) : "-", text_color=color.white)
+    
+    // S/R Zones Count
+    table.cell(structure_table, 0, 4, "S/R Zones:", text_color=color.white)
+    sr_count = str.tostring(array.size(support_levels)) + "S / " + str.tostring(array.size(resistance_levels)) + "R"
+    table.cell(structure_table, 1, 4, sr_count, text_color=color.white)
+
+// ============================================================================
+// PLOTTING
+// ============================================================================
+
+// Plot swing points
+plotshape(show_swings and not na(swing_high), "Swing High", shape.triangledown, 
+         location.abovebar, swing_high_color, size=size.tiny)
+plotshape(show_swings and not na(swing_low), "Swing Low", shape.triangleup, 
+         location.belowbar, swing_low_color, size=size.tiny)
+
+// Plot structure labels
+if show_structure_labels
+    if is_higher_high
+        label.new(bar_index - swing_length, swing_high, "HH", 
+                 style=label.style_label_down, color=swing_high_color, 
+                 textcolor=color.white, size=size.tiny)
+    
+    if is_lower_high
+        label.new(bar_index - swing_length, swing_high, "LH", 
+                 style=label.style_label_down, color=color.new(swing_high_color, 50), 
+                 textcolor=color.white, size=size.tiny)
+    
+    if is_higher_low
+        label.new(bar_index - swing_length, swing_low, "HL", 
+                 style=label.style_label_up, color=color.new(swing_low_color, 50), 
+                 textcolor=color.white, size=size.tiny)
+    
+    if is_lower_low
+        label.new(bar_index - swing_length, swing_low, "LL", 
+                 style=label.style_label_up, color=swing_low_color, 
+                 textcolor=color.white, size=size.tiny)
+
+// Plot S/R breaks
+plotshape(show_sr_breaks and resistance_break, "Resistance Break", shape.triangleup, 
+         location.belowbar, break_color, text="R-Break", size=size.small)
+plotshape(show_sr_breaks and support_break, "Support Break", shape.triangledown, 
+         location.abovebar, break_color, text="S-Break", size=size.small)
+
+// Background for trend
+bgcolor(market_structure == "Uptrend" ? color.new(color.green, 98) : 
+       market_structure == "Downtrend" ? color.new(color.red, 98) : na)
+
+// ============================================================================
+// ALERTS
+// ============================================================================
+
+alertcondition(resistance_break, "Resistance Break", "Resistance broken on {{ticker}} @ {{close}}")
+alertcondition(support_break, "Support Break", "Support broken on {{ticker}} @ {{close}}")
+alertcondition(is_higher_high, "Higher High", "New Higher High on {{ticker}}")
+alertcondition(is_lower_low, "Lower Low", "New Lower Low on {{ticker}}")
+alertcondition(market_structure == "Uptrend" and market_structure[1] != "Uptrend", "Uptrend Confirmed", "Uptrend confirmed on {{ticker}}")
+alertcondition(market_structure == "Downtrend" and market_structure[1] != "Downtrend", "Downtrend Confirmed", "Downtrend confirmed on {{ticker}}")
